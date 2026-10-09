@@ -58,7 +58,7 @@ class AudioManager {
     trySet(this.sfxKey,       'assets/audio/key_pickup.mp3');
     trySet(this.sfxCorrect,   'assets/audio/correct.mp3');
     trySet(this.sfxWrong,     'assets/audio/wrong.mp3');
-    trySet(this.sfxJumpscare, 'assets/audio/jumpscare.mp3');
+    trySet(this.sfxJumpscare, 'assets/audio/jumpscare.wav');
   }
 
   _configureVolumes() {
@@ -67,8 +67,11 @@ class AudioManager {
       this.ambient.loop   = true;
     }
     [this.footstep1, this.footstep2, this.sfxUnlock,
-     this.sfxKey, this.sfxCorrect, this.sfxWrong, this.sfxJumpscare]
+     this.sfxKey, this.sfxCorrect, this.sfxWrong]
       .forEach(el => { if (el) el.volume = this.sfxVolume; });
+    if (this.sfxJumpscare) {
+      this.sfxJumpscare.volume = 1.0;
+    }
   }
 
   /** Inicia la música ambiental (debe llamarse desde interacción del usuario) */
@@ -116,19 +119,20 @@ class AudioManager {
   }
 
   /**
-   * Genera un efecto sonoro de impacto aterrador (Screamer/Jumpscare)
-   * Combina audio tag y síntesis Web Audio API (100% garantizada en todos los navegadores)
+   * Genera un efecto sonoro de impacto aterrador: GRITO ESTRIDENTE (Human Horror Scream)
+   * Inicia con volumen alto de impacto y cubre toda la duración visual del susto sin cortarse.
    */
   playJumpscareScreamer() {
     if (this.muted) return;
 
-    // 1. Audio elemento si existe archivo
-    if (this.sfxJumpscare && this.sfxJumpscare.src) {
+    // 1. Audio elemento pre-renderizado (vocal scream en .wav/.mp3)
+    if (this.sfxJumpscare) {
+      this.sfxJumpscare.volume = 1.0;
       this.sfxJumpscare.currentTime = 0;
       this.sfxJumpscare.play().catch(() => {});
     }
 
-    // 2. Síntesis de terror procedural Web Audio API (alarido agudo + sub-bass + ruido blanco)
+    // 2. Síntesis acústica de grito humano en Web Audio API (modelo de formantes vocales abiertos)
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
@@ -141,21 +145,21 @@ class AudioManager {
 
       const ctx = this._ctx;
       const now = ctx.currentTime;
-      const duration = 2.0;
+      const duration = 2.3; // Cubre con holgura los 2.0s del susto visual
 
-      // Master Gain para el screamer
+      // Master Gain: ataque brutal a volumen máximo (1.0) en 12ms, sostenido hasta 1.85s y desvanecimiento suave hasta 2.3s
       const master = ctx.createGain();
       master.gain.setValueAtTime(0.001, now);
-      master.gain.exponentialRampToValueAtTime(0.98, now + 0.02); // Ataque brutal instantáneo
-      master.gain.setValueAtTime(0.9, now + 0.85);
+      master.gain.exponentialRampToValueAtTime(1.0, now + 0.012); // Volumen de impacto alto instantáneo
+      master.gain.setValueAtTime(0.98, now + 1.85);
       master.gain.exponentialRampToValueAtTime(0.001, now + duration);
       master.connect(ctx.destination);
 
-      // Waveshaper / Saturación no lineal extrema
+      // Saturación armónica de cuerdas vocales desgarradas
       const shaper = ctx.createWaveShaper();
-      const n_samples = 22050;
+      const n_samples = 44100;
       const curve = new Float32Array(n_samples);
-      const k = 70;
+      const k = 45;
       for (let i = 0; i < n_samples; ++i) {
         const x = (i * 2) / n_samples - 1;
         curve[i] = ((3 + k) * x * 20 * (Math.PI / 180)) / (Math.PI + k * Math.abs(x));
@@ -164,37 +168,88 @@ class AudioManager {
       shaper.oversample = '4x';
       shaper.connect(master);
 
-      // Osciladores en frecuencias de alarido agudo disonante
-      const screechFreqs = [780, 840, 1150, 1680, 2400];
-      screechFreqs.forEach((freq, idx) => {
-        const osc = ctx.createOscillator();
-        const g = ctx.createGain();
-        osc.type = idx % 2 === 0 ? 'sawtooth' : 'square';
-        osc.frequency.setValueAtTime(freq, now);
-        osc.frequency.exponentialRampToValueAtTime(freq * 1.3, now + 0.12);
-        osc.frequency.exponentialRampToValueAtTime(freq * 0.35, now + duration);
+      // --- FILTROS DE FORMANTES VOCALES (Garganta abierta gritando "¡AAAAH / AYYY!") ---
+      // F1: Resonancia faríngea (~880 Hz)
+      const formant1 = ctx.createBiquadFilter();
+      formant1.type = 'bandpass';
+      formant1.frequency.setValueAtTime(880, now);
+      formant1.Q.setValueAtTime(5.5, now);
 
-        g.gain.setValueAtTime(0.22 / screechFreqs.length, now);
-        osc.connect(g);
-        g.connect(shaper);
-        osc.start(now);
-        osc.stop(now + duration);
-      });
+      // F2: Resonancia oral (~1550 Hz)
+      const formant2 = ctx.createBiquadFilter();
+      formant2.type = 'bandpass';
+      formant2.frequency.setValueAtTime(1550, now);
+      formant2.Q.setValueAtTime(6.0, now);
 
-      // Impacto sub-grave de conmoción física (pecho)
-      const sub = ctx.createOscillator();
-      const subGain = ctx.createGain();
-      sub.type = 'sine';
-      sub.frequency.setValueAtTime(150, now);
-      sub.frequency.exponentialRampToValueAtTime(34, now + 0.5);
-      subGain.gain.setValueAtTime(0.75, now);
-      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
-      sub.connect(subGain);
-      subGain.connect(master);
-      sub.start(now);
-      sub.stop(now + 0.85);
+      // F3: Formante estridente del grito ("Singer's/Screamer's cluster" ~2950 Hz - penetrante)
+      const formant3 = ctx.createBiquadFilter();
+      formant3.type = 'bandpass';
+      formant3.frequency.setValueAtTime(2950, now);
+      formant3.Q.setValueAtTime(7.0, now);
 
-      // Ráfaga de ruido blanco raspado (aliento monstruoso desgarrado)
+      // F4: Agudos de tensión vocal (~3900 Hz)
+      const formant4 = ctx.createBiquadFilter();
+      formant4.type = 'bandpass';
+      formant4.frequency.setValueAtTime(3900, now);
+      formant4.Q.setValueAtTime(8.0, now);
+
+      const vocalBus = ctx.createGain();
+      vocalBus.gain.setValueAtTime(1.1, now);
+
+      // Conectar formantes al saturador
+      formant1.connect(vocalBus);
+      formant2.connect(vocalBus);
+      formant3.connect(vocalBus);
+      formant4.connect(vocalBus);
+      vocalBus.connect(shaper);
+
+      // --- FUENTE GLOTAL: Osciladores vocales con modulación áspera (roughness) ---
+      // LFO de aspereza vocal (frecuencia de choque 55 Hz para simular rotura de cuerdas vocales)
+      const lfoRoughness = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfoRoughness.frequency.setValueAtTime(55, now);
+      lfoGain.gain.setValueAtTime(120, now); // Modulación profunda
+      lfoRoughness.connect(lfoGain);
+      lfoRoughness.start(now);
+      lfoRoughness.stop(now + duration);
+
+      // Oscilador fundamental F0 (agudo, 780 Hz inicial con subida de terror a 1020 Hz y descenso agónico a 680 Hz)
+      const voiceOsc1 = ctx.createOscillator();
+      voiceOsc1.type = 'sawtooth';
+      voiceOsc1.frequency.setValueAtTime(780, now);
+      voiceOsc1.frequency.exponentialRampToValueAtTime(1020, now + 0.12);
+      voiceOsc1.frequency.exponentialRampToValueAtTime(860, now + 1.2);
+      voiceOsc1.frequency.exponentialRampToValueAtTime(680, now + duration);
+      lfoGain.connect(voiceOsc1.frequency);
+
+      const voiceGain1 = ctx.createGain();
+      voiceGain1.gain.setValueAtTime(0.55, now);
+      voiceOsc1.connect(voiceGain1);
+      voiceGain1.connect(formant1);
+      voiceGain1.connect(formant2);
+      voiceGain1.connect(formant3);
+      voiceGain1.connect(formant4);
+      voiceOsc1.start(now);
+      voiceOsc1.stop(now + duration);
+
+      // Oscilador armónico desfasado (simula desgarre de registro agudo / biphonación)
+      const voiceOsc2 = ctx.createOscillator();
+      voiceOsc2.type = 'sawtooth';
+      voiceOsc2.frequency.setValueAtTime(1180, now);
+      voiceOsc2.frequency.exponentialRampToValueAtTime(1520, now + 0.15);
+      voiceOsc2.frequency.exponentialRampToValueAtTime(1250, now + 1.3);
+      voiceOsc2.frequency.exponentialRampToValueAtTime(920, now + duration);
+
+      const voiceGain2 = ctx.createGain();
+      voiceGain2.gain.setValueAtTime(0.4, now);
+      voiceOsc2.connect(voiceGain2);
+      voiceGain2.connect(formant2);
+      voiceGain2.connect(formant3);
+      voiceGain2.connect(formant4);
+      voiceOsc2.start(now);
+      voiceOsc2.stop(now + duration);
+
+      // --- TURBULENCIA DE ALIENTO AGÓNICO (Ruido de aire desgarrado) ---
       const bufferSize = Math.floor(ctx.sampleRate * duration);
       const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const data = noiseBuffer.getChannelData(0);
@@ -204,24 +259,32 @@ class AudioManager {
       const noise = ctx.createBufferSource();
       noise.buffer = noiseBuffer;
 
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(3200, now);
-      filter.frequency.exponentialRampToValueAtTime(500, now + duration);
-      filter.Q.setValueAtTime(5.0, now);
-
       const noiseGain = ctx.createGain();
-      noiseGain.gain.setValueAtTime(0.45, now);
+      noiseGain.gain.setValueAtTime(0.35, now);
+      noiseGain.gain.linearRampToValueAtTime(0.5, now + 0.2);
       noiseGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
-      noise.connect(filter);
-      filter.connect(noiseGain);
-      noiseGain.connect(shaper);
-
+      noise.connect(noiseGain);
+      noiseGain.connect(formant2);
+      noiseGain.connect(formant3);
+      noiseGain.connect(formant4);
       noise.start(now);
       noise.stop(now + duration);
+
+      // --- GOLPE DE IMPACTO SUB-GRAVE AL PECHO (Shock físico en t=0) ---
+      const sub = ctx.createOscillator();
+      const subGain = ctx.createGain();
+      sub.type = 'sine';
+      sub.frequency.setValueAtTime(120, now);
+      sub.frequency.exponentialRampToValueAtTime(32, now + 0.45);
+      subGain.gain.setValueAtTime(0.85, now);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.75);
+      sub.connect(subGain);
+      subGain.connect(master);
+      sub.start(now);
+      sub.stop(now + 0.8);
     } catch (err) {
-      console.warn('[Audio] Error al reproducir screamer procedural:', err);
+      console.warn('[Audio] Error al reproducir grito estridente:', err);
     }
   }
 }

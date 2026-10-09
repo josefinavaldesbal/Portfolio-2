@@ -5,7 +5,6 @@
 
 import * as THREE from 'three';
 import { GLTFLoader }        from 'three/addons/loaders/GLTFLoader.js';
-import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { INTERACTION_POINTS, PORTFOLIO_ITEMS }  from './data.js?v=4.0';
 import { audioManager }        from './audio.js?v=4.0';
 
@@ -94,7 +93,10 @@ export class HospitalEngine {
       0.1,
       120
     );
+    this.camera.rotation.order = 'YXZ';
     this.camera.position.set(0, PLAYER_HEIGHT, 0);
+    this._yaw   = 0;
+    this._pitch = 0;
   }
 
   // ── LUCES ────────────────────────────────────────────────
@@ -151,9 +153,68 @@ export class HospitalEngine {
     });
   }
 
-  // ── CONTROLES (PointerLock para PC) ───────────────────────
+  // ── CONTROLES (First-Person PointerLock) ─────────────────
   _initControls() {
-    this.controls = new PointerLockControls(this.camera, document.body);
+    this._mouseSensitivity = 0.0022;
+
+    this._onMouseMove = (e) => {
+      if (!this.isPointerLocked) return;
+
+      const movementX = e.movementX || e.mozMovementX || e.webkitMovementX || 0;
+      const movementY = e.movementY || e.mozMovementY || e.webkitMovementY || 0;
+
+      // 1. Movimiento horizontal del mouse (X) -> Rotación Yaw (Eje Y)
+      this._yaw -= movementX * this._mouseSensitivity;
+
+      // 2. Movimiento vertical del mouse (Y) -> Inclinación Pitch (Eje X)
+      this._pitch -= movementY * this._mouseSensitivity;
+
+      // 3. Restricción estricta de ángulo vertical: [-85°, +85°]
+      // Evita volteos involuntarios al mirar directo al techo o suelo
+      const maxPitch = (85 * Math.PI) / 180; // ~1.4835 rad (~85 grados)
+      this._pitch = Math.max(-maxPitch, Math.min(maxPitch, this._pitch));
+
+      // 4. Bloqueo de rotación axial (Roll = 0): horizonte siempre nivelado
+      this._applyCameraRotation();
+    };
+
+    document.addEventListener('mousemove', this._onMouseMove);
+
+    // Objeto compatible con la API controls para llamadas externas
+    const self = this;
+    this.controls = {
+      lock: () => self.lockPointer(),
+      unlock: () => self.unlockPointer(),
+      get isLocked() { return self.isPointerLocked; }
+    };
+  }
+
+  /**
+   * Aplica la orientación de la cámara separando estrictamente los ejes:
+   * Yaw (Y), Pitch (X) y bloqueando permanentemente Roll (Z) en 0.
+   */
+  _applyCameraRotation() {
+    this.camera.rotation.order = 'YXZ';
+
+    let pitchShake = 0;
+    let yawShake   = 0;
+    let rollShake  = 0;
+
+    // Solo durante el screamer se aplica sacudida temporal
+    if (this._shakeTimer > 0) {
+      const factor = Math.max(0, this._shakeTimer / 2.0);
+      const intensity = this._shakeIntensity * factor;
+      pitchShake = (Math.random() - 0.5) * intensity * 0.15;
+      yawShake   = (Math.random() - 0.5) * intensity * 0.15;
+      rollShake  = (Math.random() - 0.5) * intensity * 0.22;
+    }
+
+    // Roll (Z) = 0 forzado en juego normal para que el horizonte jamás se descalibre
+    this.camera.rotation.set(
+      this._pitch + pitchShake,
+      this._yaw + yawShake,
+      rollShake
+    );
   }
 
   // ── WEBXR (Controladores y Realidad Virtual) ───────────────
@@ -535,8 +596,10 @@ export class HospitalEngine {
       console.log(`[Spawn] Usando fallback interior verificado: (0.00, 8.14, -2.00)`);
     }
 
-    // Mirar hacia el fondo del pasillo (-Z)
-    this.camera.rotation.set(0, 0, 0);
+    // Mirar hacia el fondo del pasillo (-Z) con horizonte nivelado
+    this._yaw = 0;
+    this._pitch = 0;
+    this._applyCameraRotation();
   }
 
   // ── INTERACCIÓN Y ENFRIAMIENTO ──────────────────────────
@@ -607,13 +670,11 @@ export class HospitalEngine {
     if (target) {
       this.camera.position.set(target.x, target.y, target.z);
     } else {
-      const back = new THREE.Vector3();
-      this.camera.getWorldDirection(back);
-      back.y = 0;
-      back.normalize();
+      const back = new THREE.Vector3(-Math.sin(this._yaw), 0, -Math.cos(this._yaw));
       this.camera.position.addScaledVector(back, -6.0);
     }
-    this.camera.rotation.z = 0;
+    this._pitch = 0;
+    this._applyCameraRotation();
   }
 
   // ── LOOP DE JUEGO (Compatible con WebXR) ─────────────────
@@ -649,14 +710,15 @@ export class HospitalEngine {
     // Actualizar sacudida violenta de cámara durante screamer
     if (this._shakeTimer > 0) {
       this._shakeTimer -= delta;
-      const factor = Math.max(0, this._shakeTimer / 2.0);
+      if (this._shakeTimer < 0) this._shakeTimer = 0;
+      const factor = this._shakeTimer / 2.0;
       const intensity = this._shakeIntensity * factor;
       this.camera.position.x += (Math.random() - 0.5) * intensity * 0.45;
       this.camera.position.y += (Math.random() - 0.5) * intensity * 0.45;
-      this.camera.rotation.z = (Math.random() - 0.5) * intensity * 0.28;
-    } else {
-      this.camera.rotation.z = 0;
     }
+
+    // Aplicar rotación estricta cada fotograma: Roll = 0 permanente
+    this._applyCameraRotation();
 
     // Parpadeo errático de linterna tras el susto
     if (this._flashlightFlickerTimer > 0) {
@@ -679,12 +741,20 @@ export class HospitalEngine {
     if (!this.controls.isLocked && !this.renderer.xr.isPresenting) return;
 
     const speed = MOVE_SPEED * delta;
-    const forward  = new THREE.Vector3();
-    const right    = new THREE.Vector3();
-    this.camera.getWorldDirection(forward);
-    forward.y = 0;
-    forward.normalize();
-    right.crossVectors(forward, new THREE.Vector3(0, 1, 0));
+    let forward, right;
+
+    if (this.renderer.xr.isPresenting) {
+      forward = new THREE.Vector3();
+      this.camera.getWorldDirection(forward);
+      forward.y = 0;
+      if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
+      else forward.normalize();
+      right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
+    } else {
+      // Cálculo analítico a partir de Yaw: desacoplado de Pitch y sin riesgo de división por cero
+      forward = new THREE.Vector3(-Math.sin(this._yaw), 0, -Math.cos(this._yaw));
+      right   = new THREE.Vector3(Math.cos(this._yaw), 0, -Math.sin(this._yaw));
+    }
 
     const moveVel = new THREE.Vector3();
 
@@ -816,10 +886,29 @@ export class HospitalEngine {
   }
 
   /** Bloquea el puntero del mouse para el control de cámara */
-  lockPointer() { this.controls.lock(); }
-  unlockPointer() { this.controls.unlock(); }
+  lockPointer() {
+    try {
+      if (document.body.requestPointerLock) {
+        document.body.requestPointerLock();
+      }
+    } catch (e) {
+      console.warn('[PointerLock] Error al solicitar bloqueo:', e);
+    }
+  }
 
-  get isPointerLocked() { return this.controls.isLocked; }
+  unlockPointer() {
+    try {
+      if (document.exitPointerLock) {
+        document.exitPointerLock();
+      }
+    } catch (e) {
+      console.warn('[PointerLock] Error al liberar puntero:', e);
+    }
+  }
+
+  get isPointerLocked() {
+    return document.pointerLockElement === document.body || document.pointerLockElement === this.canvas;
+  }
 
   // ── DEBUG: muestra posición del jugador en pantalla ─────────
   // Esto ayuda a encontrar las coordenadas exactas para poner las cajas
