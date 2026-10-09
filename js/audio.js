@@ -38,6 +38,7 @@ class AudioManager {
     this.sfxCorrect     = document.getElementById('audio-riddle-correct');
     this.sfxWrong       = document.getElementById('audio-riddle-wrong');
     this.sfxJumpscare   = document.getElementById('audio-jumpscare');
+    this.sfxShadow      = document.getElementById('audio-shadow');
 
     this._setSources();
     this._configureVolumes();
@@ -59,15 +60,16 @@ class AudioManager {
     trySet(this.sfxCorrect,   'assets/audio/correct.mp3');
     trySet(this.sfxWrong,     'assets/audio/wrong.mp3');
     trySet(this.sfxJumpscare, 'assets/audio/jumpscare.wav');
+    trySet(this.sfxShadow,    'assets/audio/shadow_whoosh.mp3');
   }
 
   _configureVolumes() {
     if (this.ambient) {
-      this.ambient.volume = this.ambientVolume;
+      this.ambient.volume = 0.45;
       this.ambient.loop   = true;
     }
     [this.footstep1, this.footstep2, this.sfxUnlock,
-     this.sfxKey, this.sfxCorrect, this.sfxWrong]
+     this.sfxKey, this.sfxCorrect, this.sfxWrong, this.sfxShadow]
       .forEach(el => { if (el) el.volume = this.sfxVolume; });
     if (this.sfxJumpscare) {
       this.sfxJumpscare.volume = 1.0;
@@ -111,11 +113,17 @@ class AudioManager {
       correct:   this.sfxCorrect,
       wrong:     this.sfxWrong,
       jumpscare: this.sfxJumpscare,
+      shadow:    this.sfxShadow,
     };
     const el = map[name];
     if (!el || !el.src) return;
     el.currentTime = 0;
     el.play().catch(() => {});
+  }
+
+  /** Reproduce el efecto sonoro de una sombra siniestra pasando rápidamente */
+  playShadowPass() {
+    this.playSFX('shadow');
   }
 
   /**

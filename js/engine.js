@@ -40,6 +40,8 @@ export class HospitalEngine {
     this._shakeTimer            = 0;      // temporizador de sacudida de cámara
     this._shakeIntensity        = 0;      // intensidad de sacudida
     this._flashlightFlickerTimer = 0;     // temporizador de parpadeo de linterna
+    this._shadowTimer           = 16.0 + Math.random() * 10.0; // tiempo para primera sombra repentina
+    this._activeShadow          = null;   // sombra espectral activa
 
     this._raycaster        = new THREE.Raycaster();
     this._downRay          = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
@@ -679,6 +681,7 @@ export class HospitalEngine {
     this._updateEffects(t);
     this._checkProximity();
     this._updatePositionDisplay();
+    this._updateShadows(delta);
 
     // Actualizar sacudida violenta de cámara durante screamer
     if (this._shakeTimer > 0) {
@@ -927,5 +930,167 @@ export class HospitalEngine {
     const p = this.camera.position;
     this._posDiv.innerHTML =
       `📍 <span style="color:#ffffff">Coordenadas:</span> X: <span style="color:#ffff00">${p.x.toFixed(2)}</span> &nbsp;|&nbsp; Y: <span style="color:#00ffff">${p.y.toFixed(2)}</span> &nbsp;|&nbsp; Z: <span style="color:#ff77ff">${p.z.toFixed(2)}</span>`;
+  }
+
+  // ── SISTEMA DE SOMBRAS FANTASMALAS REPENTINAS (Horror Specters) ──
+  _updateShadows(delta) {
+    // 1. Si hay una sombra cruzando activamente, actualizar su traslación y desvanecimiento
+    if (this._activeShadow) {
+      const sh = this._activeShadow;
+      sh.progress += delta / sh.duration;
+      const p = sh.progress;
+
+      if (p >= 1.0) {
+        // La sombra ha terminado de cruzar hacia la pared/habitación: remover de la escena
+        this.scene.remove(sh.group);
+        sh.group.traverse(child => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+            else child.material.dispose();
+          }
+        });
+        this._activeShadow = null;
+        // Programar la próxima aparición repentina entre 22 y 42 segundos
+        this._shadowTimer = 22.0 + Math.random() * 20.0;
+      } else {
+        // Mover la figura a lo largo de la trayectoria transversal
+        sh.group.position.lerpVectors(sh.startPos, sh.endPos, p);
+
+        // Curva suave de opacidad: se hace visible rápidamente (0 -> 0.85) y se disipa en la pared (0.85 -> 0)
+        let alpha = 0.85;
+        if (p < 0.2) {
+          alpha = (p / 0.2) * 0.85;
+        } else if (p > 0.72) {
+          alpha = ((1.0 - p) / 0.28) * 0.85;
+        }
+        sh.mat.opacity = Math.max(0, Math.min(0.85, alpha));
+
+        // Oscilación orgánica de zancada espectral al correr
+        sh.group.position.y = sh.startPos.y + Math.abs(Math.sin(p * Math.PI * 4)) * 0.12;
+        if (sh.torso) sh.torso.rotation.z = Math.sin(p * Math.PI * 5) * 0.15;
+      }
+      return;
+    }
+
+    // 2. Temporizador de aparición mientras el jugador está jugando
+    if (this.controls?.isLocked || this.renderer.xr.isPresenting) {
+      this._shadowTimer -= delta;
+      if (this._shadowTimer <= 0) {
+        this._triggerRandomShadowPass();
+      }
+    }
+  }
+
+  _triggerRandomShadowPass() {
+    if (this._activeShadow) return;
+
+    // Obtener vector frontal y transversal del jugador (desacoplados del pitch vertical)
+    const forward = new THREE.Vector3(-Math.sin(this._yaw), 0, -Math.cos(this._yaw)).normalize();
+    const right   = new THREE.Vector3(Math.cos(this._yaw), 0, -Math.sin(this._yaw)).normalize();
+
+    // Ubicar punto de cruce adelante en el pasillo (entre 8.5 y 14 metros frente a la vista)
+    const distAhead = 8.5 + Math.random() * 5.5;
+    const centerPoint = this.camera.position.clone().addScaledVector(forward, distAhead);
+
+    // Detección de altura del suelo en esa zona
+    let floorY = this.camera.position.y - PLAYER_HEIGHT;
+    if (this.collidableMeshes && this.collidableMeshes.length > 0) {
+      const probe = new THREE.Raycaster(
+        new THREE.Vector3(centerPoint.x, this.camera.position.y + 0.5, centerPoint.z),
+        new THREE.Vector3(0, -1, 0),
+        0.05,
+        6.0
+      );
+      const hits = probe.intersectObjects(this.collidableMeshes, false);
+      const floorHit = hits.find(h => {
+        const wn = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+        return wn.y > 0.4;
+      });
+      if (floorHit) floorY = floorHit.point.y;
+    }
+
+    // Dirección transversal del sprint: cruza de un lado del pasillo/puerta al otro
+    const direction = Math.random() < 0.5 ? 1 : -1;
+    const crossingWidth = 6.2 + Math.random() * 2.5; // cruce de ~6.2 a 8.7m
+
+    const startPos = centerPoint.clone().addScaledVector(right, -direction * (crossingWidth / 2));
+    const endPos   = centerPoint.clone().addScaledVector(right, direction * (crossingWidth / 2));
+    startPos.y = floorY;
+    endPos.y   = floorY;
+
+    // Duración del cruce rápido y repentino (0.8 a 1.1 segundos)
+    const duration = 0.8 + Math.random() * 0.3;
+
+    // Crear la figura espectral 3D (Silueta humanoide esquelética de sombra oscura)
+    const shadowGroup = new THREE.Group();
+    shadowGroup.position.copy(startPos);
+
+    const shadowMat = new THREE.MeshBasicMaterial({
+      color: 0x010103,
+      transparent: true,
+      opacity: 0.0,
+      depthWrite: false
+    });
+
+    // Torso desgarbado
+    const torsoGeo = new THREE.CylinderGeometry(0.16, 0.28, 1.4, 7);
+    const torso = new THREE.Mesh(torsoGeo, shadowMat);
+    torso.position.y = 0.95;
+    shadowGroup.add(torso);
+
+    // Cabeza sombría
+    const headGeo = new THREE.SphereGeometry(0.2, 8, 8);
+    const head = new THREE.Mesh(headGeo, shadowMat);
+    head.position.set(0, 1.75, 0.06);
+    shadowGroup.add(head);
+
+    // Brazos largos espectrales
+    const armGeo = new THREE.CylinderGeometry(0.04, 0.03, 0.95, 6);
+    const leftArm = new THREE.Mesh(armGeo, shadowMat);
+    leftArm.position.set(-0.28, 1.0, 0.1);
+    leftArm.rotation.z = 0.25;
+    leftArm.rotation.x = -0.3;
+    shadowGroup.add(leftArm);
+
+    const rightArm = new THREE.Mesh(armGeo, shadowMat);
+    rightArm.position.set(0.28, 1.0, 0.1);
+    rightArm.rotation.z = -0.25;
+    rightArm.rotation.x = 0.3;
+    shadowGroup.add(rightArm);
+
+    // Ojos pequeños huecos brillantes que miran brevemente al jugador
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
+    const eyeGeo = new THREE.SphereGeometry(0.025, 4, 4);
+    const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
+    eyeL.position.set(-0.06, 1.76, 0.18);
+    const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
+    eyeR.position.set(0.06, 1.76, 0.18);
+    shadowGroup.add(eyeL);
+    shadowGroup.add(eyeR);
+
+    // Orientar hacia el destino donde corre
+    shadowGroup.lookAt(endPos.x, startPos.y + 1.0, endPos.z);
+
+    this.scene.add(shadowGroup);
+
+    // Efectos inmersivos simultáneos:
+    // 1. Sonido envolvente siniestro de susurro/ráfaga de aire helado
+    audioManager.playShadowPass();
+
+    // 2. Parpadeo sutil de linterna por la perturbación electromagnética
+    this.flickerFlashlight(1.3);
+
+    this._activeShadow = {
+      group: shadowGroup,
+      torso: torso,
+      mat: shadowMat,
+      startPos: startPos,
+      endPos: endPos,
+      duration: duration,
+      progress: 0
+    };
+
+    console.log(`[Sombra Espectral] Silueta cruzando repentinamente el pasillo a ${distAhead.toFixed(1)}m.`);
   }
 }
