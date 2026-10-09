@@ -504,34 +504,101 @@ html, body {
 .feedback.wrong { color: #e07070; }
 
 /* ── Portfolio Modal ── */
-.portfolio-content { max-width: 800px; }
+.portfolio-content {
+  max-width: 980px;
+  width: 92%;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #0f0b0b;
+  border: 1.5px solid rgba(185, 25, 25, 0.65);
+  box-shadow: 0 0 35px rgba(180, 20, 20, 0.35), 0 10px 40px rgba(0, 0, 0, 0.9);
+  padding: 1.6rem 2.2rem;
+  border-radius: 4px;
+}
+
+#modal-portfolio .modal-header {
+  border-bottom: 1px solid #281818;
+  margin-bottom: 1.2rem;
+  padding-bottom: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#modal-portfolio .modal-header h2 {
+  font-family: var(--font-horror);
+  font-size: 1.9rem;
+  letter-spacing: 0.08em;
+  color: #ffffff;
+}
+
+#modal-portfolio .btn-close {
+  background: rgba(25, 15, 15, 0.7);
+  border: 1px solid #3d2424;
+  color: #999;
+  font-size: 0.95rem;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+#modal-portfolio .btn-close:hover {
+  color: #ffffff;
+  border-color: #ff3333;
+  background: rgba(180, 20, 20, 0.3);
+}
+
 .portfolio-body {
-  display: grid;
-  gap: 1rem;
-}
-.portfolio-item {
-  border: 1px solid #1a1a1a;
-  padding: 1rem;
-}
-.portfolio-item img {
   width: 100%;
-  height: auto;
-  display: block;
+}
+
+.portfolio-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 2rem;
+  align-items: center;
+}
+
+.portfolio-info-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.portfolio-project-title {
+  font-family: var(--font-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 1.18rem;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
   margin-bottom: 0.8rem;
 }
-.portfolio-item h3 {
-  font-family: var(--font-ui);
-  font-size: 1rem;
-  color: var(--text-light);
-  letter-spacing: 0.1em;
-  margin-bottom: 0.5rem;
-}
-.portfolio-item p {
-  font-size: 0.9rem;
-  color: var(--text-dim);
+
+.portfolio-project-desc {
+  font-family: var(--font-type), monospace, sans-serif;
+  font-size: 0.82rem;
   line-height: 1.6;
+  color: #a49c9c;
+  margin-bottom: 0.9rem;
+  text-align: left;
 }
-.portfolio-item a {
+
+.portfolio-project-tools {
+  font-family: var(--font-ui), monospace, sans-serif;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #8c8282;
+  letter-spacing: 0.02em;
+}
+
+.portfolio-project-tools strong {
+  color: #c49a45;
+  font-weight: 600;
+}
+
+.portfolio-project-link {
   display: inline-block;
   margin-top: 0.8rem;
   color: var(--red-bright);
@@ -540,9 +607,75 @@ html, body {
   letter-spacing: 0.15em;
   text-decoration: none;
   text-transform: uppercase;
-  transition: color 0.2s;
+  transition: all 0.2s;
 }
-.portfolio-item a:hover { color: #fff; }
+
+.portfolio-project-link:hover {
+  color: #ffffff;
+  text-shadow: 0 0 8px var(--red-bright);
+}
+
+.portfolio-image-col {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.portfolio-image-card {
+  position: relative;
+  width: 100%;
+  height: 310px;
+  max-height: 48vh;
+  background: #080606;
+  border: 1px solid #2e1e1e;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.7);
+}
+
+.portfolio-image-backdrop {
+  position: absolute;
+  inset: -15px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(16px) brightness(0.28);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.portfolio-image-main {
+  position: relative;
+  z-index: 2;
+  max-width: 100%;
+  max-height: 100%;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  transition: transform 0.3s ease;
+}
+
+.portfolio-image-card:hover .portfolio-image-main {
+  transform: scale(1.02);
+}
+
+@media (max-width: 850px) {
+  .portfolio-content {
+    padding: 1.4rem;
+    max-height: 90vh;
+  }
+  .portfolio-grid {
+    grid-template-columns: 1fr;
+    gap: 1.4rem;
+  }
+  .portfolio-image-card {
+    height: 240px;
+  }
+}
 
 /* ── Pause Modal ── */
 .pause-content {

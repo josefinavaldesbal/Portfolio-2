@@ -2,9 +2,9 @@
 //  HOSPITAL OLVIDADO — Punto de entrada principal
 // ════════════════════════════════════════════════════════
 
-import { HospitalEngine } from './engine.js?v=4.0';
-import { UIManager }      from './ui.js?v=4.0';
-import { audioManager }   from './audio.js?v=4.0';
+import { HospitalEngine } from './engine.js?v=5.0';
+import { UIManager }      from './ui.js?v=5.0';
+import { audioManager }   from './audio.js?v=5.0';
 
 // ── Estado global ────────────────────────────────────────
 let engine = null;
@@ -27,6 +27,7 @@ async function init() {
 
   // Crear UI (con callbacks: startGame, restartGame, startVR)
   ui = new UIManager(startGame, restartGame, handleStartVR);
+  window._ui = ui;
 
   // Mostrar pantalla de inicio
   ui.showScreen('screen-intro');

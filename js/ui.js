@@ -295,36 +295,53 @@ export class UIManager {
     const item = PORTFOLIO_ITEMS.find(p => p.id === workId);
     if (!item) return;
 
-    document.getElementById('portfolio-icon').textContent  = item.icon;
-    document.getElementById('portfolio-title').textContent = item.room;
+    const iconEl = document.getElementById('portfolio-icon');
+    const titleEl = document.getElementById('portfolio-title');
+    if (iconEl) iconEl.textContent = item.icon || '🗂';
+    if (titleEl) titleEl.textContent = (item.room || 'EXPEDIENTE').toUpperCase();
 
     const body = document.getElementById('portfolio-body');
+    const mainImg = item.images?.[0] || '';
+
     if (body) {
       body.innerHTML = `
-        <div class="portfolio-item">
-          ${item.images.map(src =>
-            `<img src="${src}" alt="${item.title}" loading="lazy"
-                  onerror="this.style.display='none'">`
-          ).join('')}
-          <h3>${item.title}</h3>
-          <p>${item.description}</p>
-          ${item.tools?.length
-            ? `<p style="color:var(--text-dim);font-size:0.8rem;margin-top:0.5rem">
-                <strong>Herramientas:</strong> ${item.tools.join(' · ')}
-               </p>`
-            : ''}
-          ${item.link
-            ? `<a href="${item.link}" target="_blank" rel="noopener">Ver proyecto →</a>`
-            : ''}
+        <div class="portfolio-grid">
+          <div class="portfolio-info-col">
+            <h3 class="portfolio-project-title">${item.title}</h3>
+            <p class="portfolio-project-desc">${item.description}</p>
+            ${item.tools?.length
+              ? `<p class="portfolio-project-tools">
+                  <strong>Herramientas:</strong> ${item.tools.join(', ')}
+                 </p>`
+              : ''}
+            ${item.link
+              ? `<a class="portfolio-project-link" href="${item.link}" target="_blank" rel="noopener">Ver proyecto →</a>`
+              : ''}
+          </div>
+          ${mainImg ? `
+            <div class="portfolio-image-col">
+              <div class="portfolio-image-card">
+                <div class="portfolio-image-backdrop" style="background-image: url('${mainImg}')"></div>
+                <img src="${mainImg}" alt="${item.title}" class="portfolio-image-main" loading="lazy"
+                     onerror="this.parentElement.style.display='none'">
+              </div>
+            </div>
+          ` : ''}
         </div>
       `;
     }
 
     document.getElementById('modal-portfolio')?.classList.remove('hidden');
+    if (window._engine && window._engine.isPointerLocked) {
+      window._engine.unlockPointer();
+    }
   }
 
   closePortfolio() {
     document.getElementById('modal-portfolio')?.classList.add('hidden');
+    if (window._engine && !window._engine.isPointerLocked) {
+      window._engine.lockPointer();
+    }
   }
 
   // ── PAUSA ─────────────────────────────────────────────────
