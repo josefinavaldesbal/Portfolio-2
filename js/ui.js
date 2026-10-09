@@ -192,17 +192,28 @@ export class UIManager {
       // ✅ Correcto
       audioManager.playSFX('correct');
       if (feedEl) {
-        feedEl.textContent = this.activeRiddle.correctMsg;
+        feedEl.innerHTML = `<span style="color:#7dd88a;font-weight:bold;font-size:1rem">✓ ¡ACERTIJO RESUELTO!</span><br>${this.activeRiddle.correctMsg}<br><span style="color:#d4af37;font-size:0.85rem">🔓 Desbloqueando expediente clínico...</span>`;
         feedEl.className   = 'feedback correct';
         feedEl.classList.remove('hidden');
       }
+
+      // Resaltar opción seleccionada y bloquear las demás
+      document.querySelectorAll('.riddle-option').forEach(btn => {
+        if (btn.dataset.answer === answer) {
+          btn.classList.add('correct');
+        } else {
+          btn.style.opacity = '0.35';
+          btn.disabled = true;
+        }
+      });
+
       const workId = this.activeRiddle.workId;
       setTimeout(() => {
         this.closeRiddle();
         this._showLoadingTransition(workId, () => {
           this._collectKey(workId);
         });
-      }, 1200);
+      }, 950);
 
     } else {
       // ❌ Incorrecto
@@ -237,29 +248,38 @@ export class UIManager {
     }
 
     if (title && item) title.textContent = `EXPEDIENTE: ${item.room.toUpperCase()}`;
-    if (subtitle) subtitle.textContent = 'Acceso concedido — Desencriptando datos clínicos…';
-    if (status) status.textContent = 'Cargando proyecto…';
-    if (bar) bar.style.width = '0%';
+    if (subtitle) subtitle.textContent = '🗝️ Llave obtenida — Acceso concedido';
+    if (status) status.textContent = 'Desencriptando y cargando proyecto… 0%';
+    if (bar) {
+      bar.style.transition = 'width 0.12s ease';
+      bar.style.width = '0%';
+    }
 
     screenTrans.classList.remove('hidden');
     audioManager.playSFX('key');
 
     let progress = 0;
     const interval = setInterval(() => {
-      progress += Math.floor(Math.random() * 20) + 16;
+      progress += Math.floor(Math.random() * 14) + 10;
       if (progress >= 100) {
         progress = 100;
         clearInterval(interval);
         if (bar) bar.style.width = '100%';
-        if (status) status.textContent = '¡Expediente y proyecto cargados!';
+        if (status) status.innerHTML = '<span style="color:#7dd88a;font-weight:bold">¡EXPEDIENTE Y PROYECTO LISTOS!</span>';
+        audioManager.playSFX('unlock');
         setTimeout(() => {
           screenTrans.classList.add('hidden');
           if (onComplete) onComplete();
-        }, 400);
+        }, 550);
       } else {
         if (bar) bar.style.width = `${progress}%`;
+        if (status) {
+          if (progress < 40) status.textContent = `Desbloqueando cerradura… ${progress}%`;
+          else if (progress < 75) status.textContent = `Cargando planos y fotografías… ${progress}%`;
+          else status.textContent = `Generando visualización… ${progress}%`;
+        }
       }
-    }, 220);
+    }, 110);
   }
 
   closeRiddle() {
@@ -307,6 +327,7 @@ export class UIManager {
       body.innerHTML = `
         <div class="portfolio-grid">
           <div class="portfolio-info-col">
+            <div class="portfolio-unlocked-badge">🗝️ PROYECTO DESBLOQUEADO</div>
             <h3 class="portfolio-project-title">${item.title}</h3>
             <p class="portfolio-project-desc">${item.description}</p>
             ${item.tools?.length
