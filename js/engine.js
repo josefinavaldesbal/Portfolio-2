@@ -37,6 +37,10 @@ export class HospitalEngine {
     this.controllers       = [];          // mandos WebXR
     this._totemGroups      = [];          // grupos de tótems 3D rotatorios
 
+    this._shakeTimer            = 0;      // temporizador de sacudida de cámara
+    this._shakeIntensity        = 0;      // intensidad de sacudida
+    this._flashlightFlickerTimer = 0;     // temporizador de parpadeo de linterna
+
     this._raycaster        = new THREE.Raycaster();
     this._downRay          = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
 
@@ -535,9 +539,14 @@ export class HospitalEngine {
     this.camera.rotation.set(0, 0, 0);
   }
 
-  // ── INTERACCIÓN ──────────────────────────────────────────
+  // ── INTERACCIÓN Y ENFRIAMIENTO ──────────────────────────
   _tryInteract() {
     if (this._nearItem) {
+      if (window._ui && window._ui.isTotemOnCooldown(this._nearItem)) {
+        const left = window._ui.getTotemCooldownSeconds(this._nearItem);
+        window._ui.showNotification(`⚠️ Tótem sellado por la entidad. Espera ${left}s...`);
+        return;
+      }
       this.onInteract(this._nearItem);
     }
   }
@@ -564,10 +573,47 @@ export class HospitalEngine {
     const text   = document.getElementById('interaction-text');
     if (this._nearItem && closest) {
       prompt?.classList.remove('hidden');
-      if (text) text.innerHTML = `<kbd>E</kbd> ${closest.label}`;
+      if (window._ui && window._ui.isTotemOnCooldown(closest.workId)) {
+        const left = window._ui.getTotemCooldownSeconds(closest.workId);
+        if (text) text.innerHTML = `<span style="color:#ff5555;font-weight:bold">⚠️ Entidad hostil cerca… Espera ${left}s</span>`;
+      } else {
+        if (text) text.innerHTML = `<kbd>E</kbd> ${closest.label}`;
+      }
     } else {
       prompt?.classList.add('hidden');
     }
+  }
+
+  // ── SACUDIDA DE CÁMARA (JUMPSCARE) Y REPULSIÓN ─────────────
+  triggerCameraShake(duration = 2.0, intensity = 0.45) {
+    this._shakeTimer = duration;
+    this._shakeIntensity = intensity;
+  }
+
+  flickerFlashlight(duration = 1.8) {
+    this._flashlightFlickerTimer = duration;
+  }
+
+  repelPlayerFromTotem(workId) {
+    // Posiciones de retirada seguras fuera de la habitación en el pasillo
+    const RETREAT_POSITIONS = {
+      'work-1': { x: -4.5, y: 8.14, z: 13.0 },
+      'work-2': { x: 19.5, y: 2.55, z: -3.8 },
+      'work-3': { x: -11.0, y: 7.65, z: 2.0 },
+      'work-4': { x: 13.0, y: 8.14, z: 2.5 },
+    };
+
+    const target = RETREAT_POSITIONS[workId];
+    if (target) {
+      this.camera.position.set(target.x, target.y, target.z);
+    } else {
+      const back = new THREE.Vector3();
+      this.camera.getWorldDirection(back);
+      back.y = 0;
+      back.normalize();
+      this.camera.position.addScaledVector(back, -6.0);
+    }
+    this.camera.rotation.z = 0;
   }
 
   // ── LOOP DE JUEGO (Compatible con WebXR) ─────────────────
@@ -599,6 +645,31 @@ export class HospitalEngine {
     this._updateEffects(t);
     this._checkProximity();
     this._updatePositionDisplay();
+
+    // Actualizar sacudida violenta de cámara durante screamer
+    if (this._shakeTimer > 0) {
+      this._shakeTimer -= delta;
+      const factor = Math.max(0, this._shakeTimer / 2.0);
+      const intensity = this._shakeIntensity * factor;
+      this.camera.position.x += (Math.random() - 0.5) * intensity * 0.45;
+      this.camera.position.y += (Math.random() - 0.5) * intensity * 0.45;
+      this.camera.rotation.z = (Math.random() - 0.5) * intensity * 0.28;
+    } else {
+      this.camera.rotation.z = 0;
+    }
+
+    // Parpadeo errático de linterna tras el susto
+    if (this._flashlightFlickerTimer > 0) {
+      this._flashlightFlickerTimer -= delta;
+      if (Math.random() < 0.45) {
+        this.flashlight.intensity = Math.random() < 0.5 ? 0.2 : 2.5;
+      } else {
+        this.flashlight.intensity = 15;
+      }
+      if (this._flashlightFlickerTimer <= 0) {
+        this.flashlight.intensity = 15;
+      }
+    }
 
     this.renderer.render(this.scene, this.camera);
   }

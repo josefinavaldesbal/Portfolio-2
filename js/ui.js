@@ -12,10 +12,17 @@ export class UIManager {
     this.onStartVR   = onStartVR;
 
     // Estado del juego
-    this.collectedKeys  = new Set();
-    this.unlockedWorks  = new Set();
-    this.totalWorks     = PORTFOLIO_ITEMS.length;
-    this.activeRiddle   = null;
+    this.collectedKeys   = new Set();
+    this.unlockedWorks   = new Set();
+    this.totalWorks      = PORTFOLIO_ITEMS.length;
+    this.activeRiddle    = null;
+
+    // Sistema de vidas e intentos por tótem
+    this.MAX_ATTEMPTS    = 3;
+    this.totemAttempts   = new Map();
+    this.totemCooldowns  = new Map();
+    this.currentAttempts = 3;
+    this._notifTimeout   = null;
 
     this._buildKeySlots();
     this._bindButtons();
@@ -118,6 +125,46 @@ export class UIManager {
     if (txt) txt.textContent = text;
   }
 
+  // ── GESTIÓN DE ENFRIAMIENTO Y NOTIFICACIONES ───────────────
+  isTotemOnCooldown(workId) {
+    const end = this.totemCooldowns.get(workId);
+    return end ? Date.now() < end : false;
+  }
+
+  getTotemCooldownSeconds(workId) {
+    const end = this.totemCooldowns.get(workId) || 0;
+    return Math.max(0, Math.ceil((end - Date.now()) / 1000));
+  }
+
+  setTotemCooldown(workId, durationMs = 12000) {
+    this.totemCooldowns.set(workId, Date.now() + durationMs);
+  }
+
+  showNotification(msg, duration = 4000) {
+    const el = document.getElementById('hud-notification');
+    if (!el) return;
+    el.innerHTML = msg;
+    el.classList.remove('hidden');
+    el.classList.add('visible');
+    clearTimeout(this._notifTimeout);
+    this._notifTimeout = setTimeout(() => {
+      el.classList.remove('visible');
+      setTimeout(() => el.classList.add('hidden'), 350);
+    }, duration);
+  }
+
+  _renderLives() {
+    for (let i = 0; i < this.MAX_ATTEMPTS; i++) {
+      const skull = document.getElementById(`life-${i}`);
+      if (!skull) continue;
+      if (i < this.currentAttempts) {
+        skull.className = 'life-skull active';
+      } else {
+        skull.className = 'life-skull lost';
+      }
+    }
+  }
+
   // ── ABRIR ACERTIJO ────────────────────────────────────────
   openRiddle(workId, engine) {
     // Si ya fue desbloqueado, mostrar el portafolio directamente
@@ -126,10 +173,26 @@ export class UIManager {
       return false; // no necesita bloquear controles de nuevo
     }
 
+    // Si el tótem está en enfriamiento por fallo de acertijo (screamer)
+    if (this.isTotemOnCooldown(workId)) {
+      const left = this.getTotemCooldownSeconds(workId);
+      this.showNotification(`⚠️ Tótem sellado por la entidad. Espera ${left}s...`);
+      return false;
+    }
+
     const riddle = RIDDLES.find(r => r.workId === workId);
     if (!riddle) return false;
 
     this.activeRiddle = riddle;
+
+    // Inicializar o recuperar intentos disponibles (máx 3)
+    if (!this.totemAttempts.has(workId)) {
+      this.totemAttempts.set(workId, this.MAX_ATTEMPTS);
+    }
+    this.currentAttempts = this.totemAttempts.get(workId);
+
+    // Actualizar indicador visual de calaveras (3 vidas)
+    this._renderLives();
 
     // Rellenar el modal
     const item = PORTFOLIO_ITEMS.find(p => p.id === workId);
@@ -141,15 +204,21 @@ export class UIManager {
       qEl.innerHTML = `<em style="color:var(--text-dim);font-size:0.85rem">${riddle.narrative}</em><br><br>${riddle.question}`;
     }
 
-    // Limpiar opciones anteriores
-    const optEl   = document.getElementById('riddle-options');
-    const inputEl = document.getElementById('riddle-input');
-    const feedEl  = document.getElementById('riddle-feedback');
+    // Limpiar opciones anteriores y reactivar inputs/botones
+    const optEl     = document.getElementById('riddle-options');
+    const inputEl   = document.getElementById('riddle-input');
+    const feedEl    = document.getElementById('riddle-feedback');
+    const submitBtn = document.getElementById('btn-riddle-submit');
+    const closeBtn  = document.getElementById('btn-riddle-close');
 
-    optEl.innerHTML = '';
+    if (submitBtn) submitBtn.disabled = false;
+    if (closeBtn)  closeBtn.disabled = false;
+
+    optEl.innerHTML    = '';
     feedEl.textContent = '';
     feedEl.className   = 'feedback hidden';
     inputEl.value      = '';
+    inputEl.disabled   = false;
 
     if (riddle.type === 'multiple') {
       inputEl.classList.add('hidden');
@@ -157,9 +226,9 @@ export class UIManager {
       const shuffled = [...riddle.options].sort(() => Math.random() - 0.5);
       shuffled.forEach(opt => {
         const btn = document.createElement('button');
-        btn.className    = 'riddle-option';
+        btn.className      = 'riddle-option';
         btn.dataset.answer = opt;
-        btn.textContent  = opt;
+        btn.textContent    = opt;
         optEl.appendChild(btn);
       });
     } else {
@@ -183,14 +252,17 @@ export class UIManager {
 
   _checkAnswer(answer) {
     if (!this.activeRiddle) return;
+    const workId  = this.activeRiddle.workId;
     const correct = this.activeRiddle.answer.toLowerCase().trim();
     const given   = (answer ?? '').toLowerCase().trim();
 
     const feedEl = document.getElementById('riddle-feedback');
 
     if (given === correct) {
-      // ✅ Correcto
+      // ✅ RESPUESTA CORRECTA
       audioManager.playSFX('correct');
+      this.totemAttempts.set(workId, this.MAX_ATTEMPTS); // Resetear intentos al ganar
+
       if (feedEl) {
         feedEl.innerHTML = `<span style="color:#7dd88a;font-weight:bold;font-size:1rem">✓ ¡ACERTIJO RESUELTO!</span><br>${this.activeRiddle.correctMsg}<br><span style="color:#d4af37;font-size:0.85rem">🔓 Desbloqueando expediente clínico...</span>`;
         feedEl.className   = 'feedback correct';
@@ -207,7 +279,6 @@ export class UIManager {
         }
       });
 
-      const workId = this.activeRiddle.workId;
       setTimeout(() => {
         this.closeRiddle();
         this._showLoadingTransition(workId, () => {
@@ -216,21 +287,116 @@ export class UIManager {
       }, 950);
 
     } else {
-      // ❌ Incorrecto
-      audioManager.playSFX('wrong');
-      if (feedEl) {
-        feedEl.textContent = this.activeRiddle.wrongMsg;
-        feedEl.className   = 'feedback wrong';
-        feedEl.classList.remove('hidden');
+      // ❌ RESPUESTA INCORRECTA — RESTAR 1 INTENTO
+      this.currentAttempts--;
+      this.totemAttempts.set(workId, this.currentAttempts);
+
+      // Animar agotamiento sobre la calavera correspondiente (de derecha a izquierda)
+      const lostSkull = document.getElementById(`life-${this.currentAttempts}`);
+      if (lostSkull) {
+        lostSkull.className = 'life-skull lost';
       }
-      // Resaltar opción incorrecta
+
+      // Sacudida visual de la caja del acertijo
+      const box = document.querySelector('.riddle-content');
+      box?.classList.add('riddle-shake');
+      setTimeout(() => box?.classList.remove('riddle-shake'), 450);
+
+      // Resaltar opción seleccionada errónea
       document.querySelectorAll('.riddle-option').forEach(btn => {
         if (btn.dataset.answer === answer) {
           btn.classList.add('wrong');
-          setTimeout(() => btn.classList.remove('wrong'), 1000);
+          setTimeout(() => btn.classList.remove('wrong'), 900);
         }
       });
+
+      if (this.currentAttempts > 0) {
+        // Aún le quedan intentos (2 o 1)
+        audioManager.playSFX('wrong');
+        if (feedEl) {
+          feedEl.innerHTML = `✕ Respuesta incorrecta. <span style="color:#ff7777;font-weight:bold">Intentos restantes: ${this.currentAttempts}/3</span>`;
+          feedEl.className = 'feedback wrong';
+          feedEl.classList.remove('hidden');
+        }
+      } else {
+        // 💀 0 INTENTOS (Condición de fallo y activación del screamer)
+        // 1. Bloquear inmediatamente todos los inputs
+        document.querySelectorAll('.riddle-option').forEach(btn => {
+          btn.disabled = true;
+        });
+        const inputEl = document.getElementById('riddle-input');
+        if (inputEl) inputEl.disabled = true;
+        const submitBtn = document.getElementById('btn-riddle-submit');
+        if (submitBtn) submitBtn.disabled = true;
+        const closeBtn = document.getElementById('btn-riddle-close');
+        if (closeBtn) closeBtn.disabled = true;
+
+        if (feedEl) {
+          feedEl.innerHTML = `<span style="color:#ff2222;font-weight:bold;font-size:0.95rem">⚠️ ¡SIN INTENTOS RESTANTES! ALGO TE HA DETECTADO...</span>`;
+          feedEl.className = 'feedback wrong';
+          feedEl.classList.remove('hidden');
+        }
+
+        // 2. Disparar el evento de fallo con screamer/jumpscare
+        setTimeout(() => {
+          this._triggerJumpscare(workId);
+        }, 400);
+      }
     }
+  }
+
+  // ── ACTIVACIÓN DEL JUMPSCARE / SCREAMER ─────────────────────
+  _triggerJumpscare(workId) {
+    // 1. Cerrar interfaz del tótem
+    this.closeRiddle();
+
+    // 2. Efecto sonoro de impacto estridente de terror
+    audioManager.playSFX('jumpscare');
+
+    // 3. Efecto visual: Desplegar en pantalla completa de forma repentina
+    const jumpscareEl = document.getElementById('jumpscare-overlay');
+    if (jumpscareEl) {
+      jumpscareEl.classList.remove('hidden');
+      jumpscareEl.classList.remove('fade-out');
+      jumpscareEl.classList.add('active');
+    }
+    document.body.classList.add('screen-shake');
+
+    // Sacudida violenta de cámara en Three.js
+    if (window._engine) {
+      window._engine.triggerCameraShake(2.0, 0.45);
+    }
+
+    // 4. Duración del screamer (2.0 segundos, dentro del rango 1.5 - 2.5s)
+    const SCREAMER_DURATION = 2000;
+
+    setTimeout(() => {
+      // Iniciar desvanecimiento a negro
+      if (jumpscareEl) jumpscareEl.classList.add('fade-out');
+
+      setTimeout(() => {
+        // 5. Flujo posterior al susto:
+        if (jumpscareEl) {
+          jumpscareEl.classList.remove('active');
+          jumpscareEl.classList.remove('fade-out');
+          jumpscareEl.classList.add('hidden');
+        }
+        document.body.classList.remove('screen-shake');
+
+        // Estado del jugador: repeler a distancia segura y parpadear linterna
+        if (window._engine) {
+          window._engine.repelPlayerFromTotem(workId);
+          window._engine.flickerFlashlight(2.0);
+          window._engine.lockPointer();
+        }
+
+        // Tiempo de enfriamiento (12 segundos) y restablecer intentos a 3
+        this.setTotemCooldown(workId, 12000);
+        this.totemAttempts.set(workId, this.MAX_ATTEMPTS);
+
+        this.showNotification('⚠️ ¡La entidad te ha expulsado! Tótem sellado temporalmente (12s)', 4500);
+      }, 250);
+    }, SCREAMER_DURATION);
   }
 
   // ── TRANSICIÓN ANIMADA ENTRE ACERTIJO Y PORTAFOLIO ──────────
@@ -285,6 +451,10 @@ export class UIManager {
   closeRiddle() {
     document.getElementById('modal-riddle')?.classList.add('hidden');
     this.activeRiddle = null;
+    const isJumpscareActive = document.getElementById('jumpscare-overlay')?.classList.contains('active');
+    if (window._engine && !window._engine.isPointerLocked && !isJumpscareActive) {
+      window._engine.lockPointer();
+    }
   }
 
   // ── RECOGER LLAVE ─────────────────────────────────────────

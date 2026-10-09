@@ -98,6 +98,10 @@ class AudioManager {
 
   playSFX(name) {
     if (this.muted) return;
+    if (name === 'jumpscare') {
+      this.playJumpscareScreamer();
+      return;
+    }
     const map = {
       key:       this.sfxKey,
       unlock:    this.sfxUnlock,
@@ -109,6 +113,116 @@ class AudioManager {
     if (!el || !el.src) return;
     el.currentTime = 0;
     el.play().catch(() => {});
+  }
+
+  /**
+   * Genera un efecto sonoro de impacto aterrador (Screamer/Jumpscare)
+   * Combina audio tag y síntesis Web Audio API (100% garantizada en todos los navegadores)
+   */
+  playJumpscareScreamer() {
+    if (this.muted) return;
+
+    // 1. Audio elemento si existe archivo
+    if (this.sfxJumpscare && this.sfxJumpscare.src) {
+      this.sfxJumpscare.currentTime = 0;
+      this.sfxJumpscare.play().catch(() => {});
+    }
+
+    // 2. Síntesis de terror procedural Web Audio API (alarido agudo + sub-bass + ruido blanco)
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!this._ctx) {
+        this._ctx = new AudioCtx();
+      }
+      if (this._ctx.state === 'suspended') {
+        this._ctx.resume();
+      }
+
+      const ctx = this._ctx;
+      const now = ctx.currentTime;
+      const duration = 2.0;
+
+      // Master Gain para el screamer
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0.001, now);
+      master.gain.exponentialRampToValueAtTime(0.98, now + 0.02); // Ataque brutal instantáneo
+      master.gain.setValueAtTime(0.9, now + 0.85);
+      master.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      master.connect(ctx.destination);
+
+      // Waveshaper / Saturación no lineal extrema
+      const shaper = ctx.createWaveShaper();
+      const n_samples = 22050;
+      const curve = new Float32Array(n_samples);
+      const k = 70;
+      for (let i = 0; i < n_samples; ++i) {
+        const x = (i * 2) / n_samples - 1;
+        curve[i] = ((3 + k) * x * 20 * (Math.PI / 180)) / (Math.PI + k * Math.abs(x));
+      }
+      shaper.curve = curve;
+      shaper.oversample = '4x';
+      shaper.connect(master);
+
+      // Osciladores en frecuencias de alarido agudo disonante
+      const screechFreqs = [780, 840, 1150, 1680, 2400];
+      screechFreqs.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = idx % 2 === 0 ? 'sawtooth' : 'square';
+        osc.frequency.setValueAtTime(freq, now);
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.3, now + 0.12);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.35, now + duration);
+
+        g.gain.setValueAtTime(0.22 / screechFreqs.length, now);
+        osc.connect(g);
+        g.connect(shaper);
+        osc.start(now);
+        osc.stop(now + duration);
+      });
+
+      // Impacto sub-grave de conmoción física (pecho)
+      const sub = ctx.createOscillator();
+      const subGain = ctx.createGain();
+      sub.type = 'sine';
+      sub.frequency.setValueAtTime(150, now);
+      sub.frequency.exponentialRampToValueAtTime(34, now + 0.5);
+      subGain.gain.setValueAtTime(0.75, now);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+      sub.connect(subGain);
+      subGain.connect(master);
+      sub.start(now);
+      sub.stop(now + 0.85);
+
+      // Ráfaga de ruido blanco raspado (aliento monstruoso desgarrado)
+      const bufferSize = Math.floor(ctx.sampleRate * duration);
+      const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(3200, now);
+      filter.frequency.exponentialRampToValueAtTime(500, now + duration);
+      filter.Q.setValueAtTime(5.0, now);
+
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.45, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(shaper);
+
+      noise.start(now);
+      noise.stop(now + duration);
+    } catch (err) {
+      console.warn('[Audio] Error al reproducir screamer procedural:', err);
+    }
   }
 }
 

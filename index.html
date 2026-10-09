@@ -75,6 +75,9 @@
       <div id="hud-crosshair">+</div>
     </div>
 
+    <!-- Notificación emergente HUD -->
+    <div id="hud-notification" class="hud-notification hidden"></div>
+
     <!-- Controles hint -->
     <div id="controls-hint">
       <span>WASD Mover</span>
@@ -113,8 +116,18 @@
   <div id="modal-riddle" class="modal hidden">
     <div class="modal-content riddle-content">
       <div class="modal-header">
-        <span class="modal-icon">📄</span>
-        <h2 id="riddle-title">Expediente Clínico</h2>
+        <div class="modal-header-info">
+          <span class="modal-icon">📄</span>
+          <h2 id="riddle-title">Expediente Clínico</h2>
+        </div>
+        <div class="riddle-attempts-tracker">
+          <span class="attempts-title">INTENTOS:</span>
+          <div id="riddle-lives" class="riddle-lives">
+            <span class="life-skull active" id="life-0" title="Intento 1">💀</span>
+            <span class="life-skull active" id="life-1" title="Intento 2">💀</span>
+            <span class="life-skull active" id="life-2" title="Intento 3">💀</span>
+          </div>
+        </div>
       </div>
       <div class="riddle-body">
         <p id="riddle-question"></p>
@@ -163,6 +176,100 @@
     </div>
   </div>
 
+  <!-- ════════ OVERLAY: SCREAMER / JUMPSCARE ════════ -->
+  <div id="jumpscare-overlay" class="jumpscare-overlay hidden">
+    <div class="jumpscare-strobe"></div>
+    <div class="jumpscare-scanlines"></div>
+    <div class="jumpscare-monster-wrap">
+      <div class="jumpscare-face">
+        <svg class="jumpscare-svg" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <radialGradient id="eyeGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ffffff" />
+              <stop offset="25%" stop-color="#ff1111" />
+              <stop offset="65%" stop-color="#aa0000" />
+              <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+            </radialGradient>
+            <radialGradient id="mouthGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#3d0000" />
+              <stop offset="60%" stop-color="#150000" />
+              <stop offset="100%" stop-color="#050000" />
+            </radialGradient>
+            <linearGradient id="skinGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#4a4d46" />
+              <stop offset="35%" stop-color="#2c302a" />
+              <stop offset="70%" stop-color="#191c18" />
+              <stop offset="100%" stop-color="#080a08" />
+            </linearGradient>
+            <filter id="horrorDistort">
+              <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" result="noise" />
+              <feDisplacementMap in="SourceGraphic" in2="noise" scale="8" xChannelSelector="R" yChannelSelector="G" />
+            </filter>
+          </defs>
+
+          <!-- Cabeza / Silueta esquelética descompuesta -->
+          <path d="M300 40 C170 40 100 130 90 270 C80 400 150 490 220 540 C270 575 330 575 380 540 C450 490 520 400 510 270 C500 130 430 40 300 40 Z" 
+                fill="url(#skinGrad)" filter="url(#horrorDistort)" stroke="#1a1c17" stroke-width="4"/>
+
+          <!-- Grietas y venas de necrosis -->
+          <path d="M220 120 Q200 180 180 220 M380 120 Q400 180 420 220 M300 70 L300 160 M260 90 Q290 120 270 180 M340 90 Q310 120 330 180" 
+                stroke="#660a0a" stroke-width="3" fill="none" opacity="0.85"/>
+          <path d="M140 260 Q110 320 130 380 M460 260 Q490 320 470 380" 
+                stroke="#880000" stroke-width="2.5" fill="none" opacity="0.75"/>
+
+          <!-- Cuencas oculares gigantes oscuras y hundidas -->
+          <ellipse cx="205" cy="245" rx="55" ry="65" fill="#000000" transform="rotate(-5 205 245)"/>
+          <ellipse cx="395" cy="245" rx="55" ry="65" fill="#000000" transform="rotate(5 395 245)"/>
+
+          <!-- Ojos demoníacos brillantes con destello rojo sangre -->
+          <circle cx="205" cy="245" r="28" fill="url(#eyeGlow)" />
+          <circle cx="395" cy="245" r="28" fill="url(#eyeGlow)" />
+          <circle cx="205" cy="245" r="6" fill="#ffffff" />
+          <circle cx="395" cy="245" r="6" fill="#ffffff" />
+
+          <!-- Cavidad nasal podrida / desgarrada -->
+          <path d="M285 305 L300 275 L315 305 L310 325 L300 330 L290 325 Z" fill="#000000"/>
+
+          <!-- Boca gigantesca abierta y desencajada (Mandíbula caída) -->
+          <path d="M165 375 Q300 340 435 375 Q465 470 420 525 Q300 565 180 525 Q135 470 165 375 Z" 
+                fill="url(#mouthGlow)" stroke="#1a0000" stroke-width="5"/>
+
+          <!-- Fondo oscuro del fondo de la garganta -->
+          <ellipse cx="300" cy="455" rx="105" ry="55" fill="#000000"/>
+
+          <!-- Dientes agudos, torcidos y ensangrentados (Fila superior) -->
+          <polygon points="175,375 185,410 195,376" fill="#ded7ba" stroke="#520505"/>
+          <polygon points="198,376 210,418 222,377" fill="#f0e9d0" stroke="#520505"/>
+          <polygon points="225,377 238,425 250,378" fill="#ded7ba" stroke="#520505"/>
+          <polygon points="253,378 268,432 282,379" fill="#ffffea" stroke="#520505"/>
+          <polygon points="285,379 300,436 315,379" fill="#ffffea" stroke="#520505"/>
+          <polygon points="318,379 332,432 347,378" fill="#ffffea" stroke="#520505"/>
+          <polygon points="350,378 362,425 375,377" fill="#ded7ba" stroke="#520505"/>
+          <polygon points="378,377 390,418 402,376" fill="#f0e9d0" stroke="#520505"/>
+          <polygon points="405,376 415,410 425,375" fill="#ded7ba" stroke="#520505"/>
+
+          <!-- Dientes agudos (Fila inferior) -->
+          <polygon points="195,510 208,468 220,515" fill="#ded7ba" stroke="#520505"/>
+          <polygon points="223,516 238,460 252,520" fill="#ffffea" stroke="#520505"/>
+          <polygon points="255,521 272,452 288,525" fill="#ffffea" stroke="#520505"/>
+          <polygon points="292,525 308,450 324,525" fill="#ffffea" stroke="#520505"/>
+          <polygon points="328,525 344,454 360,520" fill="#ffffea" stroke="#520505"/>
+          <polygon points="364,519 378,462 392,515" fill="#ded7ba" stroke="#520505"/>
+          <polygon points="395,514 406,470 418,508" fill="#ded7ba" stroke="#520505"/>
+
+          <!-- Salpicaduras y manchas de sangre que gotean de la mandíbula -->
+          <path d="M245 425 Q248 480 246 510 M295 436 Q297 495 295 535 M345 432 Q343 490 345 520" 
+                stroke="#990000" stroke-width="4" fill="none" opacity="0.9"/>
+          <circle cx="246" cy="515" r="4" fill="#880000"/>
+          <circle cx="295" cy="542" r="5" fill="#990000"/>
+          <circle cx="345" cy="526" r="4.5" fill="#880000"/>
+        </svg>
+      </div>
+    </div>
+    <div class="jumpscare-vignette"></div>
+    <div class="jumpscare-title">¡TE HA ATRAPADO!</div>
+  </div>
+
   <!-- Audio elements -->
   <audio id="audio-ambient" loop preload="auto"></audio>
   <audio id="audio-footstep-1" preload="auto"></audio>
@@ -174,6 +281,6 @@
   <audio id="audio-jumpscare" preload="auto"></audio>
 
   <!-- Scripts del juego (con versionado para ignorar cache antigua del navegador) -->
-  <script type="module" src="js/main.js?v=5.0"></script>
+  <script type="module" src="js/main.js?v=6.0"></script>
 </body>
 </html>

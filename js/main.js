@@ -58,7 +58,7 @@ async function init() {
   // Click en canvas para re-lockear el puntero
   canvas?.addEventListener('click', () => {
     if (gameStarted && !engine?.isPointerLocked) {
-      const anyModalOpen = ['modal-riddle', 'modal-portfolio', 'modal-pause', 'screen-transition']
+      const anyModalOpen = ['modal-riddle', 'modal-portfolio', 'modal-pause', 'screen-transition', 'jumpscare-overlay']
         .some(id => !document.getElementById(id)?.classList.contains('hidden'));
       if (!anyModalOpen) engine?.lockPointer();
     }
