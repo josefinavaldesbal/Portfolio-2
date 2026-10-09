@@ -744,13 +744,6 @@ export class HospitalEngine {
       const allowedMove = this._resolveWallCollisions(moveVel);
       this.camera.position.add(allowedMove);
       this.velocity.copy(allowedMove).divideScalar(Math.max(delta, 0.0001));
-
-      // Sonido de pasos periódicos
-      this._distWalked += allowedMove.length();
-      if (this._distWalked >= FOOTSTEP_DIST) {
-        this._distWalked = 0;
-        audioManager.playFootstep();
-      }
     } else {
       this.velocity.set(0, 0, 0);
     }
@@ -864,11 +857,6 @@ export class HospitalEngine {
 
     this._particles?.forEach(p => {
       p.position.y += Math.sin(t * 2 + p.userData.floatOffset) * 0.002;
-    });
-
-    // Rotación rígida continua de 360° en bucle infinito sobre su eje central vertical (eje Y)
-    this._totemGroups?.forEach(totem => {
-      totem.rotation.y += 0.012;
     });
   }
 
@@ -1074,11 +1062,7 @@ export class HospitalEngine {
 
     this.scene.add(shadowGroup);
 
-    // Efectos inmersivos simultáneos:
-    // 1. Sonido envolvente siniestro de susurro/ráfaga de aire helado
-    audioManager.playShadowPass();
-
-    // 2. Parpadeo sutil de linterna por la perturbación electromagnética
+    // Parpadeo sutil silencioso de linterna por la perturbación electromagnética
     this.flickerFlashlight(1.3);
 
     this._activeShadow = {

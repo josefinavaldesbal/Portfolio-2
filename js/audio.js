@@ -91,14 +91,9 @@ class AudioManager {
     return this.muted;
   }
 
-  /** Reproduce un paso de caminar (alterna L/R) */
+  /** Pasos desactivados a petición del usuario */
   playFootstep() {
-    if (this.muted) return;
-    const step = this.footstepToggle % 2 === 0 ? this.footstep1 : this.footstep2;
-    this.footstepToggle++;
-    if (!step || !step.src) return;
-    step.currentTime = 0;
-    step.play().catch(() => {});
+    return;
   }
 
   playSFX(name) {
