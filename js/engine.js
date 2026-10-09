@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { GLTFLoader }        from 'three/addons/loaders/GLTFLoader.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import { INTERACTION_POINTS }  from './data.js?v=4.0';
+import { INTERACTION_POINTS, PORTFOLIO_ITEMS }  from './data.js?v=4.0';
 import { audioManager }        from './audio.js?v=4.0';
 
 // ── Constantes de movimiento y física ─────────────────────
@@ -35,6 +35,7 @@ export class HospitalEngine {
     this.collidableMeshes  = [];          // mallas para colisiones horizontales y suelo
     this.doorMeshes        = [];          // mallas de puertas
     this.controllers       = [];          // mandos WebXR
+    this._totemGroups      = [];          // grupos de tótems 3D rotatorios
 
     this._raycaster        = new THREE.Raycaster();
     this._downRay          = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
@@ -260,7 +261,7 @@ export class HospitalEngine {
       : 6.44;
 
     if (this.collidableMeshes && this.collidableMeshes.length > 0) {
-      // Lanzamos un rayo desde arriba de la posición del punto hacia abajo para detectar el piso exacto
+      // Lanzamos un rayo vertical hacia abajo para detectar el piso exacto de la sala
       const probeStartY = (point.position && point.position.y !== undefined)
         ? point.position.y + 0.6
         : 14.0;
@@ -280,39 +281,98 @@ export class HospitalEngine {
       }
     }
 
-    const geo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x5a0000,
-      emissive: 0xaa0000,
-      emissiveIntensity: 0.9,
-      roughness: 0.5,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(point.position.x, floorY + 0.45, point.position.z);
-    mesh.castShadow = true;
-    mesh.userData = { workId: point.workId, label: point.label };
-    parent.add(mesh);
+    // Grupo contenedor raíz del Tótem (anclado en las coordenadas de la sala sobre el suelo)
+    const totemGroup = new THREE.Group();
+    totemGroup.position.set(point.position.x, floorY, point.position.z);
+    totemGroup.userData = { workId: point.workId, label: point.label, isTotem: true };
+    parent.add(totemGroup);
 
-    // Luz puntual brillante roja sobre la caja
-    const glow = new THREE.PointLight(0xff2200, 2.0, 6.0);
-    glow.position.set(point.position.x, floorY + 1.4, point.position.z);
-    parent.add(glow);
+    const targetSize = point.targetSize || 1.8;
 
-    // Orbe flotante brillante encima de la caja
+    // 1. Cargar el modelo 3D GLB específico para el tótem
+    if (point.model) {
+      if (!this._gltfLoader) this._gltfLoader = new GLTFLoader();
+      this._gltfLoader.load(
+        point.model,
+        (gltf) => {
+          const model = gltf.scene;
+
+          // Desactivar animaciones internas o deformaciones
+          if (gltf.animations && gltf.animations.length > 0) {
+            gltf.animations = [];
+          }
+
+          // Calcular Bounding Box para normalizar escala y apoyar en el suelo
+          const box = new THREE.Box3().setFromObject(model);
+          const size = new THREE.Vector3();
+          const center = new THREE.Vector3();
+          box.getSize(size);
+          box.getCenter(center);
+
+          const maxDim = Math.max(size.x, size.y, size.z);
+          const scale = maxDim > 0 ? targetSize / maxDim : 1;
+          model.scale.setScalar(scale);
+
+          // Centrar en X y Z y alinear la base del modelo (pivote inferior en Y) directamente en Y = 0
+          model.position.set(
+            -center.x * scale,
+            -box.min.y * scale,
+            -center.z * scale
+          );
+
+          model.traverse(child => {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+              child.userData = { workId: point.workId, label: point.label };
+              if (child.morphTargetInfluences) {
+                for (let i = 0; i < child.morphTargetInfluences.length; i++) {
+                  child.morphTargetInfluences[i] = 0;
+                }
+              }
+              if (child.material) {
+                const mats = Array.isArray(child.material) ? child.material : [child.material];
+                mats.forEach(mat => {
+                  mat.roughness = Math.max(mat.roughness ?? 0.5, 0.4);
+                });
+              }
+            }
+          });
+
+          totemGroup.add(model);
+          console.log(`[Tótem GLB] ${point.label} cargado con éxito (${point.model})`);
+        },
+        undefined,
+        (err) => {
+          console.warn(`[Tótem GLB] Error cargando ${point.model}:`, err);
+        }
+      );
+    }
+
+    // 2. Luz atmosférica puntual roja sobre el tótem (indicador de interacción)
+    const beaconY = targetSize + 0.25;
+    const glow = new THREE.PointLight(0xff2200, 1.8, 5.0);
+    glow.position.set(0, beaconY, 0);
+    totemGroup.add(glow);
+
+    // 3. Orbe flotante brillante encima del tótem
     const particle = new THREE.Mesh(
-      new THREE.SphereGeometry(0.12, 12, 12),
+      new THREE.SphereGeometry(0.10, 12, 12),
       new THREE.MeshBasicMaterial({ color: 0xff3333 })
     );
-    particle.position.set(point.position.x, floorY + 1.25, point.position.z);
+    particle.position.set(0, beaconY + 0.15, 0);
     particle.userData.floatOffset = Math.random() * Math.PI * 2;
-    parent.add(particle);
+    totemGroup.add(particle);
 
-    console.log(`[Caja 3D] ${point.label} situada exactamente en X:${point.position.x} Y:${(floorY + 0.45).toFixed(2)} Z:${point.position.z}`);
+    console.log(`[Tótem 3D] ${point.label} situado en X:${point.position.x} Y:${floorY.toFixed(2)} Z:${point.position.z}`);
 
     if (!this._particles) this._particles = [];
+    if (!this._totemGroups) this._totemGroups = [];
     if (!this._interactableObjects) this._interactableObjects = [];
-    this._interactableObjects.push(mesh);
+
     this._particles.push(particle);
+    this._totemGroups.push(totemGroup);
+    this._interactableObjects.push(totemGroup);
   }
 
   // ── CARGA DEL MODELO GLB + APERTURA DE PUERTAS + SPAWN SEGURO ──
@@ -394,6 +454,7 @@ export class HospitalEngine {
           }
           this._interactableObjects = [];
           this._particles = [];
+          this._totemGroups = [];
 
           // 3. Crear objetos interactivos en sus habitaciones exactas
           INTERACTION_POINTS.forEach(point => {
@@ -677,10 +738,9 @@ export class HospitalEngine {
       p.position.y += Math.sin(t * 2 + p.userData.floatOffset) * 0.002;
     });
 
-    this.scene.traverse(child => {
-      if (child.isMesh && child.userData.workId) {
-        child.rotation.y += 0.012;
-      }
+    // Rotación rígida continua de 360° en bucle infinito sobre su eje central vertical (eje Y)
+    this._totemGroups?.forEach(totem => {
+      totem.rotation.y += 0.012;
     });
   }
 

@@ -123,10 +123,38 @@ export const RIDDLES = [
  * Coordenadas exactas obtenidas in-game:
  */
 export const INTERACTION_POINTS = [
-  { workId: 'work-1', position: { x: -10.16, y: 8.15, z: 15.43 }, radius: 3.2, label: 'Sala de Cirugía' },
-  { workId: 'work-2', position: { x:  27.09, y: 2.55, z: -3.88 }, radius: 3.2, label: 'Morgue'          },
-  { workId: 'work-3', position: { x: -19.69, y: 7.65, z:  2.09 }, radius: 3.2, label: 'Laboratorio'     },
-  { workId: 'work-4', position: { x:  21.12, y: 8.14, z:  2.68 }, radius: 3.2, label: 'Psiquiátrico'    },
+  {
+    workId: 'work-1',
+    position: { x: -10.16, y: 8.15, z: 15.43 },
+    radius: 3.5,
+    label: 'Sala de Cirugía',
+    model: 'assets/models/old_abandoned_hospital_bed.glb',
+    targetSize: 2.2,
+  },
+  {
+    workId: 'work-2',
+    position: { x:  27.09, y: 2.55, z: -3.88 },
+    radius: 3.5,
+    label: 'Morgue',
+    model: 'assets/models/dirty_water_closet.glb',
+    targetSize: 1.6,
+  },
+  {
+    workId: 'work-3',
+    position: { x: -19.69, y: 7.65, z:  2.09 },
+    radius: 3.5,
+    label: 'Laboratorio',
+    model: 'assets/models/abandoned_antique_recliner_lounge.glb',
+    targetSize: 2.2,
+  },
+  {
+    workId: 'work-4',
+    position: { x:  21.12, y: 8.14, z:  2.68 },
+    radius: 3.5,
+    label: 'Psiquiátrico',
+    model: 'assets/models/ruined_green_chair.glb',
+    targetSize: 1.5,
+  },
 ];
 
 
