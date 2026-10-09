@@ -30,6 +30,7 @@ export class HospitalEngine {
     this._running          = false;
     this._keys             = {};          // teclas presionadas
     this._distWalked       = 0;           // para trigger de pasos
+    this.velocity          = new THREE.Vector3(0, 0, 0); // velocidad del jugador / collider
     this._nearItem         = null;        // ítem interactuable cercano
     this.collidableMeshes  = [];          // mallas para colisiones horizontales y suelo
     this.doorMeshes        = [];          // mallas de puertas
@@ -269,6 +270,7 @@ export class HospitalEngine {
       if (e.code === 'KeyE') this._tryInteract();
     });
     window.addEventListener('keyup',   e => { this._keys[e.code] = false; });
+    window.addEventListener('blur',    () => { this._keys = {}; });
     window.addEventListener('resize',  () => this._onResize());
   }
 
@@ -556,50 +558,9 @@ export class HospitalEngine {
 
   // ── CALCULAR SPAWN POINT SEGURO DENTRO DEL HOSPITAL ────────
   _findSafeInteriorSpawn(model) {
-    // Probar candidatos de pasillo interior en planta baja (el pasillo central corre a lo largo de Z con X=0)
-    const candidatePoints = [
-      { x: 0, z: -2 },
-      { x: 0, z: 0 },
-      { x: 0, z: -5 },
-      { x: 0, z: 2 },
-      { x: 1, z: -2 },
-      { x: -1, z: -2 }
-    ];
-
-    const probeRay = new THREE.Raycaster();
-    let selectedSpawn = null;
-
-    for (const cand of candidatePoints) {
-      probeRay.set(new THREE.Vector3(cand.x, 16.0, cand.z), new THREE.Vector3(0, -1, 0));
-      probeRay.far = 25.0;
-      const hits = probeRay.intersectObjects(this.collidableMeshes, false);
-
-      if (hits.length > 0) {
-        // Encontrar el piso de la planta principal (suelo a Y ~ 6.44)
-        const floorHit = hits.find(h => {
-          const worldNormal = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
-          return worldNormal.y > 0.5 && h.point.y >= 5.0 && h.point.y <= 8.0;
-        });
-        if (floorHit) {
-          selectedSpawn = new THREE.Vector3(cand.x, floorHit.point.y + PLAYER_HEIGHT, cand.z);
-          break;
-        }
-      }
-    }
-
-    if (selectedSpawn) {
-      this.camera.position.copy(selectedSpawn);
-      console.log(`[Spawn] Jugador ubicado en el interior del hospital: (${selectedSpawn.x.toFixed(2)}, ${selectedSpawn.y.toFixed(2)}, ${selectedSpawn.z.toFixed(2)})`);
-    } else {
-      // Fallback exacto verificado sobre el suelo interior del pasillo (Y = 6.44 + 1.7 = 8.14)
-      this.camera.position.set(0, 8.14, -2);
-      console.log(`[Spawn] Usando fallback interior verificado: (0.00, 8.14, -2.00)`);
-    }
-
-    // Mirar hacia el fondo del pasillo (-Z) con horizonte nivelado
-    this._yaw = 0;
-    this._pitch = 0;
-    this._applyCameraRotation();
+    // Reaparición obligatoria y fija en la entrada del hospital: (0.00, 8.14, -2.00)
+    this.respawnPlayer();
+    console.log('[Spawn Inicial] Jugador posicionado en la entrada fija del hospital: (0.00, 8.14, -2.00)');
   }
 
   // ── INTERACCIÓN Y ENFRIAMIENTO ──────────────────────────
@@ -657,24 +618,36 @@ export class HospitalEngine {
     this._flashlightFlickerTimer = duration;
   }
 
-  repelPlayerFromTotem(workId) {
-    // Posiciones de retirada seguras fuera de la habitación en el pasillo
-    const RETREAT_POSITIONS = {
-      'work-1': { x: -4.5, y: 8.14, z: 13.0 },
-      'work-2': { x: 19.5, y: 2.55, z: -3.8 },
-      'work-3': { x: -11.0, y: 7.65, z: 2.0 },
-      'work-4': { x: 13.0, y: 8.14, z: 2.5 },
-    };
+  /**
+   * Reaparición fija y obligatoria en la entrada del hospital:
+   * Coordenadas exactas: X: 0.00, Y: 8.14, Z: -2.00
+   * Resetea inmediatamente velocidades lineales/angulares, inercia de caída, sacudida
+   * y orienta la vista hacia el interior del hospital con horizonte nivelado.
+   */
+  respawnPlayer() {
+    // 1. Punto de reaparición fijo en la entrada del hospital
+    this.camera.position.set(0.00, 8.14, -2.00);
 
-    const target = RETREAT_POSITIONS[workId];
-    if (target) {
-      this.camera.position.set(target.x, target.y, target.z);
-    } else {
-      const back = new THREE.Vector3(-Math.sin(this._yaw), 0, -Math.cos(this._yaw));
-      this.camera.position.addScaledVector(back, -6.0);
-    }
-    this._pitch = 0;
+    // 2. Reinicio inmediato de físicas, velocidades e inercia previa
+    this.velocity.set(0, 0, 0);
+    this._keys = {};
+    this._distWalked = 0;
+    this._shakeTimer = 0;
+    this._shakeIntensity = 0;
+
+    // 3. Orientación de cámara: mirando hacia el interior del pasillo (-Z) con horizonte nivelado (Roll = 0, Pitch = 0)
+    this._yaw   = 0.0;
+    this._pitch = 0.0;
     this._applyCameraRotation();
+
+    console.log('[Respawn] Jugador reubicado en la entrada fija: (0.00, 8.14, -2.00), físicas y orientación reiniciadas.');
+  }
+
+  /**
+   * Alias de compatibilidad: cualquier orden de repeler o reiniciar redirige al respawn fijo
+   */
+  repelPlayerFromTotem(workId) {
+    this.respawnPlayer();
   }
 
   // ── LOOP DE JUEGO (Compatible con WebXR) ─────────────────
@@ -767,6 +740,7 @@ export class HospitalEngine {
       // Resolver colisiones con paredes antes de mover
       const allowedMove = this._resolveWallCollisions(moveVel);
       this.camera.position.add(allowedMove);
+      this.velocity.copy(allowedMove).divideScalar(Math.max(delta, 0.0001));
 
       // Sonido de pasos periódicos
       this._distWalked += allowedMove.length();
@@ -774,6 +748,8 @@ export class HospitalEngine {
         this._distWalked = 0;
         audioManager.playFootstep();
       }
+    } else {
+      this.velocity.set(0, 0, 0);
     }
   }
 
@@ -834,6 +810,14 @@ export class HospitalEngine {
   // ── DETECCIÓN DE SUELO Y ESCALERAS (Subir y bajar) ─────────
   _updateGroundElevation() {
     if (this.collidableMeshes.length === 0) return;
+
+    // Salvaguarda anticaída al vacío (out-of-bounds):
+    // Si por algún desajuste el jugador cae fuera del mapa o por debajo del suelo mínimo
+    if (this.camera.position.y < 1.0 || this.camera.position.y > 22.0) {
+      console.warn('[Físicas] Caída fuera de límites del hospital detectada. Reubicando en entrada fija.');
+      this.respawnPlayer();
+      return;
+    }
 
     const rayOrigin = this.camera.position.clone();
     rayOrigin.y += 0.8; // Empezar sondeo ligeramente arriba del jugador

@@ -383,9 +383,9 @@ export class UIManager {
         }
         document.body.classList.remove('screen-shake');
 
-        // Estado del jugador: repeler a distancia segura y parpadear linterna
+        // Estado del jugador: reaparición fija en la entrada del hospital y parpadear linterna
         if (window._engine) {
-          window._engine.repelPlayerFromTotem(workId);
+          window._engine.respawnPlayer();
           window._engine.flickerFlashlight(2.0);
           window._engine.lockPointer();
         }
