@@ -22,10 +22,12 @@ export class HospitalEngine {
    * @param {Function} onInteract — callback(workId) cuando el jugador presiona E o interactúa en VR
    * @param {Function} onProgress — callback(percent, text) durante la carga
    */
-  constructor(canvas, onInteract, onProgress) {
+  constructor(canvas, onInteract, onProgress, onZombieCaught = null) {
     this.canvas            = canvas;
     this.onInteract        = onInteract;
     this.onProgress        = onProgress;
+    this.onZombieCaught    = onZombieCaught;
+    this._zombieCooldown   = 0;
 
     this._running          = false;
     this._keys             = {};          // teclas presionadas
@@ -1192,6 +1194,32 @@ export class HospitalEngine {
     if (!this._zombiePatrol) return;
 
     const p = this._zombiePatrol;
+
+    if (this._zombieCooldown > 0) {
+      this._zombieCooldown -= delta;
+    }
+
+    // 0. DETECCIÓN DE CONTACTO / CHOQUE CON EL JUGADOR -> JUMPSCARE
+    const camPos = this.camera.position;
+    const pPos = p.group.position;
+    const distToPlayer = Math.hypot(camPos.x - pPos.x, camPos.z - pPos.z);
+    const heightDiff = Math.abs(camPos.y - (p.floorY + PLAYER_HEIGHT));
+
+    // Si el jugador y el zombie están en el mismo piso y a menos de 1.15m de distancia (contacto físico)
+    if (distToPlayer < 1.15 && heightDiff < 1.3 && this._zombieCooldown <= 0) {
+      this._zombieCooldown = 6.0; // tiempo de enfriamiento para no reactivar durante el respawn
+
+      // Orientar de inmediato al zombie de frente al jugador
+      p.group.lookAt(camPos.x, p.floorY, camPos.z);
+
+      // Disparar Jumpscare Screamer
+      if (typeof this.onZombieCaught === 'function') {
+        this.onZombieCaught();
+      } else if (window._ui && typeof window._ui.triggerZombieJumpscare === 'function') {
+        window._ui.triggerZombieJumpscare();
+      }
+      return;
+    }
 
     // 1. Orientar grupo y obtener vector frontal real en espacio de mundo
     p.group.rotation.y = p.currentYaw;

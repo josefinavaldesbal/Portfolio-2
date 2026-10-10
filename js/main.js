@@ -88,6 +88,10 @@ async function startGame() {
       // Callback: progreso de carga
       (percent, text) => {
         ui.setLoadingProgress(percent, text);
+      },
+      // Callback: contacto con el zombie -> disparar jumpscare
+      () => {
+        ui.triggerZombieJumpscare();
       }
     );
     window._engine = engine;

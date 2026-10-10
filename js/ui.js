@@ -23,6 +23,7 @@ export class UIManager {
     this.totemCooldowns  = new Map();
     this.currentAttempts = 3;
     this._notifTimeout   = null;
+    this._isJumpscareActive = false;
 
     this._buildKeySlots();
     this._bindButtons();
@@ -345,8 +346,11 @@ export class UIManager {
     }
   }
 
-  // ── ACTIVACIÓN DEL JUMPSCARE / SCREAMER ─────────────────────
+  // ── ACTIVACIÓN DEL JUMPSCARE / SCREAMER (POR ACERTIJO) ─────
   _triggerJumpscare(workId) {
+    if (this._isJumpscareActive) return;
+    this._isJumpscareActive = true;
+
     // 1. Cerrar interfaz del tótem
     this.closeRiddle();
 
@@ -391,10 +395,66 @@ export class UIManager {
         }
 
         // Tiempo de enfriamiento (12 segundos) y restablecer intentos a 3
-        this.setTotemCooldown(workId, 12000);
-        this.totemAttempts.set(workId, this.MAX_ATTEMPTS);
+        if (workId) {
+          this.setTotemCooldown(workId, 12000);
+          this.totemAttempts.set(workId, this.MAX_ATTEMPTS);
+        }
 
         this.showNotification('⚠️ ¡La entidad te ha expulsado! Tótem sellado temporalmente (12s)', 4500);
+        this._isJumpscareActive = false;
+      }, 250);
+    }, SCREAMER_DURATION);
+  }
+
+  // ── ACTIVACIÓN DEL JUMPSCARE POR COLISIÓN / CONTACTO CON EL ZOMBIE ──
+  triggerZombieJumpscare() {
+    if (this._isJumpscareActive) return;
+    this._isJumpscareActive = true;
+
+    // 1. Cerrar cualquier ventana abierta
+    this.closeRiddle();
+    this.closePortfolio();
+
+    // 2. Efecto sonoro de susto estridente
+    audioManager.playSFX('jumpscare');
+
+    // 3. Efecto visual: Desplegar en pantalla completa el screamer
+    const jumpscareEl = document.getElementById('jumpscare-overlay');
+    if (jumpscareEl) {
+      jumpscareEl.classList.remove('hidden');
+      jumpscareEl.classList.remove('fade-out');
+      jumpscareEl.classList.add('active');
+    }
+    document.body.classList.add('screen-shake');
+
+    // Sacudida violenta de cámara
+    if (window._engine) {
+      window._engine.triggerCameraShake(2.0, 0.55);
+    }
+
+    // 4. Duración del screamer (2.0 segundos)
+    const SCREAMER_DURATION = 2000;
+
+    setTimeout(() => {
+      if (jumpscareEl) jumpscareEl.classList.add('fade-out');
+
+      setTimeout(() => {
+        if (jumpscareEl) {
+          jumpscareEl.classList.remove('active');
+          jumpscareEl.classList.remove('fade-out');
+          jumpscareEl.classList.add('hidden');
+        }
+        document.body.classList.remove('screen-shake');
+
+        // Estado del jugador: reaparición fija en la entrada del hospital y parpadear linterna
+        if (window._engine) {
+          window._engine.respawnPlayer();
+          window._engine.flickerFlashlight(2.5);
+          window._engine.lockPointer();
+        }
+
+        this.showNotification('⚠️ ¡EL ZOMBIE TE HA ATRAPADO! Has sido expulsado al vestíbulo.', 5000);
+        this._isJumpscareActive = false;
       }, 250);
     }, SCREAMER_DURATION);
   }
