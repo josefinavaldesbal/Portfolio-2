@@ -681,6 +681,8 @@ export class HospitalEngine {
   _animate() {
     if (!this._running) return;
 
+    this._frameCount = (this._frameCount || 0) + 1;
+
     const delta = this._clock.getDelta();
     const t     = this._clock.getElapsedTime();
 
@@ -1237,7 +1239,7 @@ export class HospitalEngine {
     });
   }
 
-  // ── ACTUALIZACIÓN DE ENTIDADES ZOMBIE EN LAS 4 HABITACIONES ──
+  // ── ACTUALIZACIÓN DE ENTIDADES ZOMBIE EN LAS 4 HABITACIONES (OPTIMIZADA) ──
   _updateZombiePatrol(delta) {
     if (!this._zombieEntities || this._zombieEntities.length === 0) return;
 
@@ -1246,9 +1248,15 @@ export class HospitalEngine {
     }
 
     const camPos = this.camera.position;
+    const frame = this._frameCount || 0;
 
     for (let i = 0; i < this._zombieEntities.length; i++) {
       const p = this._zombieEntities[i];
+      const pPos = p.group.position;
+      const distToPlayer = Math.hypot(camPos.x - pPos.x, camPos.z - pPos.z);
+
+      // Optimización de rendimiento: Si el zombie está muy lejos (>50m), omitir cálculo
+      if (distToPlayer > 50.0) continue;
 
       // Actualizar animación del mixer individual
       if (p.mixer) {
@@ -1256,10 +1264,7 @@ export class HospitalEngine {
       }
 
       // 0. DETECCIÓN DE CONTACTO / CHOQUE CON EL JUGADOR -> JUMPSCARE
-      const pPos = p.group.position;
-      const distToPlayer = Math.hypot(camPos.x - pPos.x, camPos.z - pPos.z);
       const heightDiff = Math.abs(camPos.y - (p.floorY + PLAYER_HEIGHT));
-
       if (distToPlayer < 1.15 && heightDiff < 1.3 && this._zombieCooldown <= 0) {
         this._zombieCooldown = 6.0; // tiempo de enfriamiento durante respawn
 
@@ -1282,124 +1287,128 @@ export class HospitalEngine {
 
       let obstacleAhead = false;
 
-      // 2. Detección y repulsión contra el GLB tótem de la sala
+      // 2. Detección y repulsión contra el GLB tótem de la sala (cama, bañera, sillón, etc.)
       if (p.totemPos) {
-        const distToTotem = Math.hypot(p.group.position.x - p.totemPos.x, p.group.position.z - p.totemPos.z);
+        const distToTotem = Math.hypot(pPos.x - p.totemPos.x, pPos.z - p.totemPos.z);
         if (distToTotem < p.totemRadius + 0.6) {
-          const away = p.group.position.clone().sub(p.totemPos);
+          const away = pPos.clone().sub(p.totemPos);
           away.y = 0;
           if (away.lengthSq() < 0.001) away.set(1, 0, 0);
           away.normalize();
 
-          const awayYaw = Math.atan2(away.x, away.z);
-          const yawDiff = Math.abs(Math.atan2(Math.sin(awayYaw - p.currentYaw), Math.cos(awayYaw - p.currentYaw)));
-          if (yawDiff > 0.4 || p.rethinkTimer <= 0) {
-            p.targetYaw = awayYaw + (Math.random() - 0.5) * 0.4;
-            p.rethinkTimer = 2.0 + Math.random() * 1.5;
-          }
+          p.targetYaw = Math.atan2(away.x, away.z) + (Math.random() - 0.5) * 0.3;
+          p.rethinkTimer = 2.0;
 
           if (distToTotem < p.totemRadius) {
             obstacleAhead = true;
-            p.group.position.x = p.totemPos.x + away.x * p.totemRadius;
-            p.group.position.z = p.totemPos.z + away.z * p.totemRadius;
+            pPos.x = p.totemPos.x + away.x * p.totemRadius;
+            pPos.z = p.totemPos.z + away.z * p.totemRadius;
           }
         }
       }
 
-      // 3. Detección de paredes con raycasting (altura del pecho)
+      // 3. Detección de paredes con raycasting (repartido entre fotogramas para rendimiento 60 FPS)
       if (this.collidableMeshes && this.collidableMeshes.length > 0) {
-        const chestPos = p.group.position.clone();
-        chestPos.y += 0.85;
+        if ((frame + i) % 3 === 0) {
+          const chestPos = pPos.clone();
+          chestPos.y += 0.85;
 
-        this._raycaster.set(chestPos, forward);
-        this._raycaster.far = 0.95;
-        const frontHits = this._raycaster.intersectObjects(this.collidableMeshes, false);
+          this._raycaster.set(chestPos, forward);
+          this._raycaster.far = 0.90;
+          const frontHits = this._raycaster.intersectObjects(this.collidableMeshes, false);
 
-        const obstacleHit = frontHits.find(hit => {
-          if (!hit || !hit.face) return false;
-          if (hit.object && hit.object.userData && hit.object.userData.isTotem) return true;
-          const wn = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-          return Math.abs(wn.y) < 0.45;
-        });
+          const obstacleHit = frontHits.find(hit => {
+            if (!hit || !hit.face) return false;
+            if (hit.object && hit.object.userData && hit.object.userData.isTotem) return true;
+            const wn = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+            return Math.abs(wn.y) < 0.45;
+          });
 
-        if (obstacleHit) {
-          obstacleAhead = true;
+          if (obstacleHit) {
+            p._obstacleDetected = true;
+            const wallNormal = obstacleHit.face.normal.clone().transformDirection(obstacleHit.object.matrixWorld);
+            wallNormal.y = 0;
+            if (wallNormal.lengthSq() < 0.001) wallNormal.set(-forward.x, 0, -forward.z);
+            wallNormal.normalize();
 
-          const wallNormal = obstacleHit.face.normal.clone().transformDirection(obstacleHit.object.matrixWorld);
-          wallNormal.y = 0;
-          if (wallNormal.lengthSq() < 0.001) {
-            wallNormal.set(-forward.x, 0, -forward.z);
-          }
-          wallNormal.normalize();
-
-          const angleDiff = Math.abs(Math.atan2(Math.sin(p.targetYaw - p.currentYaw), Math.cos(p.targetYaw - p.currentYaw)));
-          if (angleDiff < 0.3 || p.rethinkTimer <= 0) {
+            // Rebotar hacia adentro de la sala
             const bounceDir = wallNormal.clone().add(new THREE.Vector3(
-              (Math.random() - 0.5) * 0.5,
+              (Math.random() - 0.5) * 0.4,
               0,
-              (Math.random() - 0.5) * 0.5
+              (Math.random() - 0.5) * 0.4
             )).normalize();
             p.targetYaw = Math.atan2(bounceDir.x, bounceDir.z);
-            p.rethinkTimer = 2.0 + Math.random() * 2.0;
-          }
+            p.rethinkTimer = 1.8;
 
-          if (obstacleHit.distance < 0.4) {
-            p.group.position.addScaledVector(wallNormal, 0.04);
+            if (obstacleHit.distance < 0.35) {
+              pPos.addScaledVector(wallNormal, 0.06);
+            }
+          } else {
+            p._obstacleDetected = false;
           }
         }
+        if (p._obstacleDetected) obstacleAhead = true;
       }
 
       // 4. Confinamiento perimetral dentro de su sala
-      const distToCenter = Math.hypot(p.group.position.x - p.center.x, p.group.position.z - p.center.z);
+      const distToCenter = Math.hypot(pPos.x - p.center.x, pPos.z - p.center.z);
       if (distToCenter > p.roomRadius) {
-        const toCenter = p.center.clone().sub(p.group.position);
+        const toCenter = p.center.clone().sub(pPos);
         toCenter.y = 0;
         toCenter.normalize();
-        p.targetYaw = Math.atan2(toCenter.x, toCenter.z) + (Math.random() - 0.5) * 0.3;
-        p.rethinkTimer = 2.5 + Math.random() * 1.5;
+        p.targetYaw = Math.atan2(toCenter.x, toCenter.z);
+        p.rethinkTimer = 2.0;
 
         if (distToCenter > p.roomRadius + 0.3) {
-          const offset = p.group.position.clone().sub(p.center);
+          const offset = pPos.clone().sub(p.center);
           offset.y = 0;
           offset.setLength(p.roomRadius + 0.3);
-          p.group.position.x = p.center.x + offset.x;
-          p.group.position.z = p.center.z + offset.z;
+          pPos.x = p.center.x + offset.x;
+          pPos.z = p.center.z + offset.z;
         }
       }
 
-      // 5. Delimitación cartesiana
+      // 5. Delimitación cartesiana: si toca el borde, empujar hacia el centro de inmediato sin trabarse
       if (p.bounds) {
-        p.group.position.x = THREE.MathUtils.clamp(p.group.position.x, p.bounds.minX, p.bounds.maxX);
-        p.group.position.z = THREE.MathUtils.clamp(p.group.position.z, p.bounds.minZ, p.bounds.maxZ);
+        const clampedX = THREE.MathUtils.clamp(pPos.x, p.bounds.minX, p.bounds.maxX);
+        const clampedZ = THREE.MathUtils.clamp(pPos.z, p.bounds.minZ, p.bounds.maxZ);
+        if (clampedX !== pPos.x || clampedZ !== pPos.z) {
+          pPos.x = clampedX;
+          pPos.z = clampedZ;
+          const toCenter = p.center.clone().sub(pPos);
+          toCenter.y = 0;
+          toCenter.normalize();
+          p.targetYaw = Math.atan2(toCenter.x, toCenter.z);
+          p.currentYaw = p.targetYaw;
+          p.rethinkTimer = 2.0;
+        }
       }
 
       // 6. Temporizador de cambio de rumbo espontáneo y orgánico
       p.rethinkTimer -= delta;
       if (p.rethinkTimer <= 0) {
-        p.targetYaw += (Math.random() - 0.5) * 1.8;
-        p.rethinkTimer = 2.5 + Math.random() * 3.5;
+        p.targetYaw += (Math.random() - 0.5) * 1.6;
+        p.rethinkTimer = 2.5 + Math.random() * 3.0;
       }
 
-      // 7. Giro suave hacia targetYaw (interpolación angular)
+      // 7. Giro ágil y fluido (turnSpeed = 4.2 rad/s para no demorarse girando)
       let diff = p.targetYaw - p.currentYaw;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      const maxTurn = p.turnSpeed * delta;
+      const maxTurn = 4.2 * delta;
       if (Math.abs(diff) <= maxTurn) {
         p.currentYaw = p.targetYaw;
       } else {
         p.currentYaw += Math.sign(diff) * maxTurn;
       }
-
       p.group.rotation.y = p.currentYaw;
 
-      // 8. Aplicar movimiento si no está bloqueado
-      if (!obstacleAhead) {
-        const step = forward.clone().multiplyScalar(p.speed * delta);
-        p.group.position.add(step);
-      }
+      // 8. Movimiento continuo: si hay obstáculo enfrente, reduce velocidad pero SIGUE avanzando sin quedarse pegado
+      const actualSpeed = obstacleAhead ? p.speed * 0.35 : p.speed;
+      const step = forward.clone().multiplyScalar(actualSpeed * delta);
+      pPos.add(step);
 
       // Mantener piso de la sala
-      p.group.position.y = p.floorY;
+      pPos.y = p.floorY;
     }
   }
 }
