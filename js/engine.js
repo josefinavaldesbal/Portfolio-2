@@ -42,6 +42,8 @@ export class HospitalEngine {
     this._flashlightFlickerTimer = 0;     // temporizador de parpadeo de linterna
     this._shadowTimer           = 16.0 + Math.random() * 10.0; // tiempo para primera sombra repentina
     this._activeShadow          = null;   // sombra espectral activa
+    this._zombieMixer           = null;   // AnimationMixer del zombie
+    this._zombiePatrol          = null;   // Datos de patrulla circular del zombie
 
     this._raycaster        = new THREE.Raycaster();
     this._downRay          = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
@@ -533,6 +535,9 @@ export class HospitalEngine {
           // 4. Ubicación de Spawn Seguro DENTRO del pasillo del hospital
           this._findSafeInteriorSpawn(model);
 
+          // 5. Cargar entidad patrullando en Sala de Cirugía
+          this._loadCirugiaEntity('assets/models/zombie.glb');
+
           // Ajustes de atmósfera lumínica de terror oscuro
           this.scene.traverse(child => {
             if (child.isAmbientLight) child.intensity = 0.5;
@@ -682,6 +687,7 @@ export class HospitalEngine {
     this._checkProximity();
     this._updatePositionDisplay();
     this._updateShadows(delta);
+    this._updateZombiePatrol(delta);
 
     // Actualizar sacudida violenta de cámara durante screamer
     if (this._shakeTimer > 0) {
@@ -1076,5 +1082,119 @@ export class HospitalEngine {
     };
 
     console.log(`[Sombra Espectral] Silueta cruzando repentinamente el pasillo a ${distAhead.toFixed(1)}m.`);
+  }
+
+  // ── ENTIDAD PATRULLA EN SALA DE CIRUGÍA (ZOMBIE) ───────────
+  _loadCirugiaEntity(modelPath = 'assets/models/zombie.glb') {
+    if (!this._gltfLoader) this._gltfLoader = new GLTFLoader();
+
+    this._gltfLoader.load(
+      modelPath,
+      (gltf) => {
+        const zombie = gltf.scene;
+
+        // Normalizar escala arquitectónica (humanoide de ~1.85m de altura)
+        const box = new THREE.Box3().setFromObject(zombie);
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        box.getSize(size);
+        box.getCenter(center);
+
+        const targetHeight = 1.85;
+        const scale = size.y > 0 ? targetHeight / size.y : 1;
+        zombie.scale.setScalar(scale);
+
+        // Alinear la base de los pies en el origen Y = 0 y centrar en X/Z
+        zombie.position.set(
+          -center.x * scale,
+          -box.min.y * scale,
+          -center.z * scale
+        );
+
+        zombie.traverse(child => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            if (child.material) {
+              const mats = Array.isArray(child.material) ? child.material : [child.material];
+              mats.forEach(m => {
+                m.roughness = Math.max(m.roughness ?? 0.5, 0.4);
+              });
+            }
+          }
+        });
+
+        // Crear grupo contenedor para mover y orientar en la órbita circular
+        const zombieGroup = new THREE.Group();
+        zombieGroup.add(zombie);
+
+        // Detectar altura exacta de piso en Sala de Cirugía (-10.16, 15.43)
+        let floorY = 8.15 - PLAYER_HEIGHT; // ~6.45
+        if (this.collidableMeshes && this.collidableMeshes.length > 0) {
+          const probe = new THREE.Raycaster(
+            new THREE.Vector3(-10.16, 9.0, 15.43),
+            new THREE.Vector3(0, -1, 0),
+            0.05,
+            6.0
+          );
+          const hits = probe.intersectObjects(this.collidableMeshes, false);
+          const floorHit = hits.find(h => {
+            const wn = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+            return wn.y > 0.4;
+          });
+          if (floorHit) floorY = floorHit.point.y;
+        }
+
+        // Datos de patrullaje circular en Sala de Cirugía
+        this._zombiePatrol = {
+          group: zombieGroup,
+          center: new THREE.Vector3(-10.16, floorY, 15.43),
+          radius: 2.1,     // radio del círculo de patrullaje en metros
+          angle: 0.0,      // ángulo actual en radianes
+          speed: 0.6,      // velocidad de caminata circular
+          floorY: floorY
+        };
+
+        // Activar la animación de caminata
+        if (gltf.animations && gltf.animations.length > 0) {
+          this._zombieMixer = new THREE.AnimationMixer(zombie);
+          const clip = gltf.animations[0];
+          const action = this._zombieMixer.clipAction(clip);
+          action.play();
+        }
+
+        // Posicionar inicialmente
+        const initX = this._zombiePatrol.center.x + Math.cos(0) * this._zombiePatrol.radius;
+        const initZ = this._zombiePatrol.center.z + Math.sin(0) * this._zombiePatrol.radius;
+        zombieGroup.position.set(initX, floorY, initZ);
+
+        this.scene.add(zombieGroup);
+        console.log(`[Zombie Cirugía] Modelo cargado y patrullando en Sala de Cirugía (${modelPath})`);
+      },
+      undefined,
+      (err) => {
+        console.warn('[Zombie Cirugía] No se pudo cargar el modelo zombie.glb:', err);
+      }
+    );
+  }
+
+  _updateZombiePatrol(delta) {
+    if (this._zombieMixer) {
+      this._zombieMixer.update(delta);
+    }
+    if (this._zombiePatrol) {
+      const p = this._zombiePatrol;
+      p.angle += delta * p.speed;
+
+      const curX = p.center.x + Math.cos(p.angle) * p.radius;
+      const curZ = p.center.z + Math.sin(p.angle) * p.radius;
+      p.group.position.set(curX, p.floorY, curZ);
+
+      // Orientar de forma tangente a la trayectoria circular hacia el siguiente punto
+      const nextAngle = p.angle + 0.1;
+      const nextX = p.center.x + Math.cos(nextAngle) * p.radius;
+      const nextZ = p.center.z + Math.sin(nextAngle) * p.radius;
+      p.group.lookAt(nextX, p.floorY, nextZ);
+    }
   }
 }
