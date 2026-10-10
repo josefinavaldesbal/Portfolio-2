@@ -44,8 +44,7 @@ export class HospitalEngine {
     this._flashlightFlickerTimer = 0;     // temporizador de parpadeo de linterna
     this._shadowTimer           = 16.0 + Math.random() * 10.0; // tiempo para primera sombra repentina
     this._activeShadow          = null;   // sombra espectral activa
-    this._zombieMixer           = null;   // AnimationMixer del zombie
-    this._zombiePatrol          = null;   // Datos de patrulla circular del zombie
+    this._zombieEntities        = [];     // lista de entidades zombie en las distintas salas
 
     this._raycaster        = new THREE.Raycaster();
     this._downRay          = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
@@ -539,8 +538,8 @@ export class HospitalEngine {
           // 4. Ubicación de Spawn Seguro DENTRO del pasillo del hospital
           this._findSafeInteriorSpawn(model);
 
-          // 5. Cargar entidad patrullando en Sala de Cirugía
-          this._loadCirugiaEntity('assets/models/zombie.glb');
+          // 5. Cargar entidades zombie en las 4 salas
+          this._loadZombieEntities('assets/models/zombie.glb');
 
           // Ajustes de atmósfera lumínica de terror oscuro
           this.scene.traverse(child => {
@@ -1088,268 +1087,319 @@ export class HospitalEngine {
     console.log(`[Sombra Espectral] Silueta cruzando repentinamente el pasillo a ${distAhead.toFixed(1)}m.`);
   }
 
-  // ── ENTIDAD PATRULLA EN SALA DE CIRUGÍA (ZOMBIE) ───────────
-  _loadCirugiaEntity(modelPath = 'assets/models/zombie.glb') {
+  // ── ENTIDADES ZOMBIE EN LAS 4 HABITACIONES (CIRUGÍA, MORGUE, LABORATORIO, PSIQUIÁTRICO) ──
+  _loadZombieEntities(modelPath = 'assets/models/zombie.glb') {
     if (!this._gltfLoader) this._gltfLoader = new GLTFLoader();
+    this._zombieEntities = [];
 
-    this._gltfLoader.load(
-      modelPath,
-      (gltf) => {
-        const zombie = gltf.scene;
-
-        // Normalizar escala arquitectónica (humanoide de ~1.85m de altura)
-        const box = new THREE.Box3().setFromObject(zombie);
-        const size = new THREE.Vector3();
-        const center = new THREE.Vector3();
-        box.getSize(size);
-        box.getCenter(center);
-
-        const targetHeight = 1.85;
-        const scale = size.y > 0 ? targetHeight / size.y : 1;
-        zombie.scale.setScalar(scale);
-
-        // Alinear la base de los pies en el origen Y = 0 y centrar en X/Z
-        zombie.position.set(
-          -center.x * scale,
-          -box.min.y * scale,
-          -center.z * scale
-        );
-
-        zombie.traverse(child => {
-          if (child.isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-            if (child.material) {
-              const mats = Array.isArray(child.material) ? child.material : [child.material];
-              mats.forEach(m => {
-                m.roughness = Math.max(m.roughness ?? 0.5, 0.4);
-              });
-            }
-          }
-        });
-
-        // Crear grupo contenedor para mover y orientar en la órbita circular
-        const zombieGroup = new THREE.Group();
-        zombieGroup.add(zombie);
-
-        // Detectar altura exacta de piso en el centro espacioso de Sala de Cirugía (-7.20, 13.50)
-        let floorY = 8.15 - PLAYER_HEIGHT; // ~6.45
-        if (this.collidableMeshes && this.collidableMeshes.length > 0) {
-          const probe = new THREE.Raycaster(
-            new THREE.Vector3(-7.20, 9.0, 13.50),
-            new THREE.Vector3(0, -1, 0),
-            0.05,
-            6.0
-          );
-          const hits = probe.intersectObjects(this.collidableMeshes, false);
-          const floorHit = hits.find(h => {
-            const wn = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
-            return wn.y > 0.4;
-          });
-          if (floorHit) floorY = floorHit.point.y;
-        }
-
-        // Datos de deambulación libre con prevención de colisión contra paredes y la cama GLB
-        this._zombiePatrol = {
-          group: zombieGroup,
-          center: new THREE.Vector3(-7.20, floorY, 13.50), // Centro libre y espacioso de Sala de Cirugía
-          roomRadius: 3.2,       // Radio de patrullaje dentro de la sala
-          currentYaw: Math.random() * Math.PI * 2, // orientación actual
-          targetYaw: Math.random() * Math.PI * 2,  // orientación deseada
-          speed: 0.70,           // velocidad de caminata natural (m/s)
-          turnSpeed: 3.2,        // velocidad de giro suave (rad/s)
-          rethinkTimer: 2.0,     // temporizador de cambio de dirección
-          floorY: floorY,
-          bedPos: new THREE.Vector3(-10.16, floorY, 15.43), // Coordenada exacta de la cama de cirugía
-          bedRadius: 1.6         // Perímetro impenetrable alrededor de la cama
-        };
-
-        // Activar la animación de caminata continua
-        if (gltf.animations && gltf.animations.length > 0) {
-          this._zombieMixer = new THREE.AnimationMixer(zombie);
-          const clip = gltf.animations[0];
-          const action = this._zombieMixer.clipAction(clip);
-          action.play();
-        }
-
-        // Posicionar inicialmente en el centro espacioso de la sala (lejos de la cama y de las paredes)
-        zombieGroup.position.set(-7.20, floorY, 13.50);
-        zombieGroup.rotation.y = this._zombiePatrol.currentYaw;
-
-        this.scene.add(zombieGroup);
-        console.log(`[Zombie Cirugía] Modelo cargado y deambulando libremente en Sala de Cirugía (-7.20, 13.50).`);
+    const ROOM_CONFIGS = [
+      {
+        roomName: 'Sala de Cirugía',
+        spawnPos: { x: -7.20, z: 13.50 },
+        center: { x: -7.20, z: 13.50 },
+        probeY: 9.0,
+        estimatedFloorY: 8.15 - PLAYER_HEIGHT,
+        roomRadius: 3.2,
+        totemPos: { x: -10.16, z: 15.43 },
+        totemRadius: 1.6,
+        bounds: { minX: -10.6, maxX: -4.2, minZ: 11.0, maxZ: 15.9 }
       },
-      undefined,
-      (err) => {
-        console.warn('[Zombie Cirugía] No se pudo cargar el modelo zombie.glb:', err);
+      {
+        roomName: 'Morgue',
+        spawnPos: { x: 25.00, z: -3.88 },
+        center: { x: 25.00, z: -3.88 },
+        probeY: 5.0,
+        estimatedFloorY: 2.55 - PLAYER_HEIGHT,
+        roomRadius: 2.6,
+        totemPos: { x: 27.09, z: -3.88 },
+        totemRadius: 1.4,
+        bounds: { minX: 22.8, maxX: 28.5, minZ: -6.5, maxZ: -1.2 }
+      },
+      {
+        roomName: 'Laboratorio',
+        spawnPos: { x: -17.20, z: 2.09 },
+        center: { x: -17.20, z: 2.09 },
+        probeY: 9.0,
+        estimatedFloorY: 7.65 - PLAYER_HEIGHT,
+        roomRadius: 2.8,
+        totemPos: { x: -19.69, z: 2.09 },
+        totemRadius: 1.5,
+        bounds: { minX: -21.0, maxX: -15.2, minZ: -0.5, maxZ: 4.8 }
+      },
+      {
+        roomName: 'Psiquiátrico',
+        spawnPos: { x: 18.60, z: 2.68 },
+        center: { x: 18.60, z: 2.68 },
+        probeY: 9.0,
+        estimatedFloorY: 8.14 - PLAYER_HEIGHT,
+        roomRadius: 2.8,
+        totemPos: { x: 21.12, z: 2.68 },
+        totemRadius: 1.4,
+        bounds: { minX: 16.5, maxX: 22.5, minZ: 0.2, maxZ: 5.2 }
       }
-    );
+    ];
+
+    ROOM_CONFIGS.forEach(cfg => {
+      this._gltfLoader.load(
+        modelPath,
+        (gltf) => {
+          const zombie = gltf.scene;
+
+          // Normalizar escala arquitectónica (humanoide de ~1.85m de altura)
+          const box = new THREE.Box3().setFromObject(zombie);
+          const size = new THREE.Vector3();
+          const center = new THREE.Vector3();
+          box.getSize(size);
+          box.getCenter(center);
+
+          const targetHeight = 1.85;
+          const scale = size.y > 0 ? targetHeight / size.y : 1;
+          zombie.scale.setScalar(scale);
+
+          // Alinear base de los pies en Y = 0 y centrar en X/Z
+          zombie.position.set(
+            -center.x * scale,
+            -box.min.y * scale,
+            -center.z * scale
+          );
+
+          zombie.traverse(child => {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+              if (child.material) {
+                const mats = Array.isArray(child.material) ? child.material : [child.material];
+                mats.forEach(m => {
+                  m.roughness = Math.max(m.roughness ?? 0.5, 0.4);
+                });
+              }
+            }
+          });
+
+          const zombieGroup = new THREE.Group();
+          zombieGroup.add(zombie);
+
+          // Detectar altura exacta de piso para esta sala
+          let floorY = cfg.estimatedFloorY;
+          if (this.collidableMeshes && this.collidableMeshes.length > 0) {
+            const probe = new THREE.Raycaster(
+              new THREE.Vector3(cfg.spawnPos.x, cfg.probeY, cfg.spawnPos.z),
+              new THREE.Vector3(0, -1, 0),
+              0.05,
+              10.0
+            );
+            const hits = probe.intersectObjects(this.collidableMeshes, false);
+            const floorHit = hits.find(h => {
+              const wn = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+              return wn.y > 0.4;
+            });
+            if (floorHit) floorY = floorHit.point.y;
+          }
+
+          // Animación de caminata
+          let mixer = null;
+          if (gltf.animations && gltf.animations.length > 0) {
+            mixer = new THREE.AnimationMixer(zombie);
+            const clip = gltf.animations[0];
+            const action = mixer.clipAction(clip);
+            action.play();
+          }
+
+          const entity = {
+            group: zombieGroup,
+            mixer: mixer,
+            roomName: cfg.roomName,
+            center: new THREE.Vector3(cfg.center.x, floorY, cfg.center.z),
+            roomRadius: cfg.roomRadius,
+            currentYaw: Math.random() * Math.PI * 2,
+            targetYaw: Math.random() * Math.PI * 2,
+            speed: 0.65 + Math.random() * 0.15,
+            turnSpeed: 3.0,
+            rethinkTimer: 1.5 + Math.random() * 2.0,
+            floorY: floorY,
+            totemPos: new THREE.Vector3(cfg.totemPos.x, floorY, cfg.totemPos.z),
+            totemRadius: cfg.totemRadius,
+            bounds: cfg.bounds
+          };
+
+          zombieGroup.position.set(cfg.spawnPos.x, floorY, cfg.spawnPos.z);
+          zombieGroup.rotation.y = entity.currentYaw;
+
+          this.scene.add(zombieGroup);
+          this._zombieEntities.push(entity);
+          console.log(`[Zombie] Cargado en ${cfg.roomName} (${cfg.spawnPos.x}, ${floorY.toFixed(2)}, ${cfg.spawnPos.z})`);
+        },
+        undefined,
+        (err) => {
+          console.warn(`[Zombie] Error cargando zombie en ${cfg.roomName}:`, err);
+        }
+      );
+    });
   }
 
-  // ── IA DE DEAMBULACIÓN LIBRE SIN ATRAVESAR PAREDES NI LA CAMA GLB ──
+  // ── ACTUALIZACIÓN DE ENTIDADES ZOMBIE EN LAS 4 HABITACIONES ──
   _updateZombiePatrol(delta) {
-    if (this._zombieMixer) {
-      this._zombieMixer.update(delta);
-    }
-    if (!this._zombiePatrol) return;
-
-    const p = this._zombiePatrol;
+    if (!this._zombieEntities || this._zombieEntities.length === 0) return;
 
     if (this._zombieCooldown > 0) {
       this._zombieCooldown -= delta;
     }
 
-    // 0. DETECCIÓN DE CONTACTO / CHOQUE CON EL JUGADOR -> JUMPSCARE
     const camPos = this.camera.position;
-    const pPos = p.group.position;
-    const distToPlayer = Math.hypot(camPos.x - pPos.x, camPos.z - pPos.z);
-    const heightDiff = Math.abs(camPos.y - (p.floorY + PLAYER_HEIGHT));
 
-    // Si el jugador y el zombie están en el mismo piso y a menos de 1.15m de distancia (contacto físico)
-    if (distToPlayer < 1.15 && heightDiff < 1.3 && this._zombieCooldown <= 0) {
-      this._zombieCooldown = 6.0; // tiempo de enfriamiento para no reactivar durante el respawn
+    for (let i = 0; i < this._zombieEntities.length; i++) {
+      const p = this._zombieEntities[i];
 
-      // Orientar de inmediato al zombie de frente al jugador
-      p.group.lookAt(camPos.x, p.floorY, camPos.z);
-
-      // Disparar Jumpscare Screamer
-      if (typeof this.onZombieCaught === 'function') {
-        this.onZombieCaught();
-      } else if (window._ui && typeof window._ui.triggerZombieJumpscare === 'function') {
-        window._ui.triggerZombieJumpscare();
+      // Actualizar animación del mixer individual
+      if (p.mixer) {
+        p.mixer.update(delta);
       }
-      return;
-    }
 
-    // 1. Orientar grupo y obtener vector frontal real en espacio de mundo
-    p.group.rotation.y = p.currentYaw;
-    const forward = new THREE.Vector3();
-    p.group.getWorldDirection(forward);
-    forward.y = 0;
-    forward.normalize();
+      // 0. DETECCIÓN DE CONTACTO / CHOQUE CON EL JUGADOR -> JUMPSCARE
+      const pPos = p.group.position;
+      const distToPlayer = Math.hypot(camPos.x - pPos.x, camPos.z - pPos.z);
+      const heightDiff = Math.abs(camPos.y - (p.floorY + PLAYER_HEIGHT));
 
-    let obstacleAhead = false;
+      if (distToPlayer < 1.15 && heightDiff < 1.3 && this._zombieCooldown <= 0) {
+        this._zombieCooldown = 6.0; // tiempo de enfriamiento durante respawn
 
-    // 2. Detección y repulsión impenetrable contra la cama GLB (Sala de Cirugía)
-    if (p.bedPos) {
-      const distToBed = Math.hypot(p.group.position.x - p.bedPos.x, p.group.position.z - p.bedPos.z);
-      if (distToBed < p.bedRadius + 0.6) {
-        // Cerca de la cama -> orientar rumbo alejándose de la cama
-        const awayFromBed = p.group.position.clone().sub(p.bedPos);
-        awayFromBed.y = 0;
-        if (awayFromBed.lengthSq() < 0.001) awayFromBed.set(1, 0, 0);
-        awayFromBed.normalize();
+        p.group.lookAt(camPos.x, p.floorY, camPos.z);
 
-        const awayYaw = Math.atan2(awayFromBed.x, awayFromBed.z);
-        const yawDiff = Math.abs(Math.atan2(Math.sin(awayYaw - p.currentYaw), Math.cos(awayYaw - p.currentYaw)));
-        if (yawDiff > 0.4 || p.rethinkTimer <= 0) {
-          p.targetYaw = awayYaw + (Math.random() - 0.5) * 0.4;
-          p.rethinkTimer = 2.0 + Math.random() * 1.5;
+        if (typeof this.onZombieCaught === 'function') {
+          this.onZombieCaught(p.roomName);
+        } else if (window._ui && typeof window._ui.triggerZombieJumpscare === 'function') {
+          window._ui.triggerZombieJumpscare(p.roomName);
         }
+        return; // Detener loop durante susto
+      }
 
-        // Si intenta entrar al volumen físico de la cama, bloquear avance y empujar hacia afuera
-        if (distToBed < p.bedRadius) {
+      // 1. Orientar grupo y obtener vector frontal real en espacio de mundo
+      p.group.rotation.y = p.currentYaw;
+      const forward = new THREE.Vector3();
+      p.group.getWorldDirection(forward);
+      forward.y = 0;
+      forward.normalize();
+
+      let obstacleAhead = false;
+
+      // 2. Detección y repulsión contra el GLB tótem de la sala
+      if (p.totemPos) {
+        const distToTotem = Math.hypot(p.group.position.x - p.totemPos.x, p.group.position.z - p.totemPos.z);
+        if (distToTotem < p.totemRadius + 0.6) {
+          const away = p.group.position.clone().sub(p.totemPos);
+          away.y = 0;
+          if (away.lengthSq() < 0.001) away.set(1, 0, 0);
+          away.normalize();
+
+          const awayYaw = Math.atan2(away.x, away.z);
+          const yawDiff = Math.abs(Math.atan2(Math.sin(awayYaw - p.currentYaw), Math.cos(awayYaw - p.currentYaw)));
+          if (yawDiff > 0.4 || p.rethinkTimer <= 0) {
+            p.targetYaw = awayYaw + (Math.random() - 0.5) * 0.4;
+            p.rethinkTimer = 2.0 + Math.random() * 1.5;
+          }
+
+          if (distToTotem < p.totemRadius) {
+            obstacleAhead = true;
+            p.group.position.x = p.totemPos.x + away.x * p.totemRadius;
+            p.group.position.z = p.totemPos.z + away.z * p.totemRadius;
+          }
+        }
+      }
+
+      // 3. Detección de paredes con raycasting (altura del pecho)
+      if (this.collidableMeshes && this.collidableMeshes.length > 0) {
+        const chestPos = p.group.position.clone();
+        chestPos.y += 0.85;
+
+        this._raycaster.set(chestPos, forward);
+        this._raycaster.far = 0.95;
+        const frontHits = this._raycaster.intersectObjects(this.collidableMeshes, false);
+
+        const obstacleHit = frontHits.find(hit => {
+          if (!hit || !hit.face) return false;
+          if (hit.object && hit.object.userData && hit.object.userData.isTotem) return true;
+          const wn = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+          return Math.abs(wn.y) < 0.45;
+        });
+
+        if (obstacleHit) {
           obstacleAhead = true;
-          p.group.position.x = p.bedPos.x + awayFromBed.x * p.bedRadius;
-          p.group.position.z = p.bedPos.z + awayFromBed.z * p.bedRadius;
+
+          const wallNormal = obstacleHit.face.normal.clone().transformDirection(obstacleHit.object.matrixWorld);
+          wallNormal.y = 0;
+          if (wallNormal.lengthSq() < 0.001) {
+            wallNormal.set(-forward.x, 0, -forward.z);
+          }
+          wallNormal.normalize();
+
+          const angleDiff = Math.abs(Math.atan2(Math.sin(p.targetYaw - p.currentYaw), Math.cos(p.targetYaw - p.currentYaw)));
+          if (angleDiff < 0.3 || p.rethinkTimer <= 0) {
+            const bounceDir = wallNormal.clone().add(new THREE.Vector3(
+              (Math.random() - 0.5) * 0.5,
+              0,
+              (Math.random() - 0.5) * 0.5
+            )).normalize();
+            p.targetYaw = Math.atan2(bounceDir.x, bounceDir.z);
+            p.rethinkTimer = 2.0 + Math.random() * 2.0;
+          }
+
+          if (obstacleHit.distance < 0.4) {
+            p.group.position.addScaledVector(wallNormal, 0.04);
+          }
         }
       }
-    }
 
-    // 3. Detección de paredes y obstáculos frontales con raycasting (altura del pecho)
-    if (this.collidableMeshes && this.collidableMeshes.length > 0) {
-      const chestPos = p.group.position.clone();
-      chestPos.y += 0.85;
+      // 4. Confinamiento perimetral dentro de su sala
+      const distToCenter = Math.hypot(p.group.position.x - p.center.x, p.group.position.z - p.center.z);
+      if (distToCenter > p.roomRadius) {
+        const toCenter = p.center.clone().sub(p.group.position);
+        toCenter.y = 0;
+        toCenter.normalize();
+        p.targetYaw = Math.atan2(toCenter.x, toCenter.z) + (Math.random() - 0.5) * 0.3;
+        p.rethinkTimer = 2.5 + Math.random() * 1.5;
 
-      // Rayo frontal directo (distancia de detección 0.95m)
-      this._raycaster.set(chestPos, forward);
-      this._raycaster.far = 0.95;
-      const frontHits = this._raycaster.intersectObjects(this.collidableMeshes, false);
-
-      const obstacleHit = frontHits.find(hit => {
-        if (!hit || !hit.face) return false;
-        if (hit.object && hit.object.userData && hit.object.userData.isTotem) return true;
-        const wn = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-        return Math.abs(wn.y) < 0.45;
-      });
-
-      if (obstacleHit) {
-        obstacleAhead = true;
-
-        const wallNormal = obstacleHit.face.normal.clone().transformDirection(obstacleHit.object.matrixWorld);
-        wallNormal.y = 0;
-        if (wallNormal.lengthSq() < 0.001) {
-          wallNormal.set(-forward.x, 0, -forward.z);
-        }
-        wallNormal.normalize();
-
-        // Fijar nuevo rumbo hacia el espacio abierto solo si no estamos girando decididamente ya
-        const angleDiff = Math.abs(Math.atan2(Math.sin(p.targetYaw - p.currentYaw), Math.cos(p.targetYaw - p.currentYaw)));
-        if (angleDiff < 0.3 || p.rethinkTimer <= 0) {
-          const bounceDir = wallNormal.clone().add(new THREE.Vector3(
-            (Math.random() - 0.5) * 0.5,
-            0,
-            (Math.random() - 0.5) * 0.5
-          )).normalize();
-          p.targetYaw = Math.atan2(bounceDir.x, bounceDir.z);
-          p.rethinkTimer = 2.0 + Math.random() * 2.0;
-        }
-
-        // Si está muy pegado (<0.4m), amortiguar separación
-        if (obstacleHit.distance < 0.4) {
-          p.group.position.addScaledVector(wallNormal, 0.04);
+        if (distToCenter > p.roomRadius + 0.3) {
+          const offset = p.group.position.clone().sub(p.center);
+          offset.y = 0;
+          offset.setLength(p.roomRadius + 0.3);
+          p.group.position.x = p.center.x + offset.x;
+          p.group.position.z = p.center.z + offset.z;
         }
       }
-    }
 
-    // 4. Confinamiento estricto en Sala de Cirugía (no salir hacia el pasillo)
-    const distToCenter = Math.hypot(p.group.position.x - p.center.x, p.group.position.z - p.center.z);
-    if (distToCenter > p.roomRadius) {
-      const toCenter = p.center.clone().sub(p.group.position);
-      toCenter.y = 0;
-      toCenter.normalize();
-      p.targetYaw = Math.atan2(toCenter.x, toCenter.z) + (Math.random() - 0.5) * 0.3;
-      p.rethinkTimer = 2.5 + Math.random() * 1.5;
-
-      if (distToCenter > p.roomRadius + 0.3) {
-        const offset = p.group.position.clone().sub(p.center);
-        offset.y = 0;
-        offset.setLength(p.roomRadius + 0.3);
-        p.group.position.x = p.center.x + offset.x;
-        p.group.position.z = p.center.z + offset.z;
+      // 5. Delimitación cartesiana
+      if (p.bounds) {
+        p.group.position.x = THREE.MathUtils.clamp(p.group.position.x, p.bounds.minX, p.bounds.maxX);
+        p.group.position.z = THREE.MathUtils.clamp(p.group.position.z, p.bounds.minZ, p.bounds.maxZ);
       }
+
+      // 6. Temporizador de cambio de rumbo espontáneo y orgánico
+      p.rethinkTimer -= delta;
+      if (p.rethinkTimer <= 0) {
+        p.targetYaw += (Math.random() - 0.5) * 1.8;
+        p.rethinkTimer = 2.5 + Math.random() * 3.5;
+      }
+
+      // 7. Giro suave hacia targetYaw (interpolación angular)
+      let diff = p.targetYaw - p.currentYaw;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      const maxTurn = p.turnSpeed * delta;
+      if (Math.abs(diff) <= maxTurn) {
+        p.currentYaw = p.targetYaw;
+      } else {
+        p.currentYaw += Math.sign(diff) * maxTurn;
+      }
+
+      p.group.rotation.y = p.currentYaw;
+
+      // 8. Aplicar movimiento si no está bloqueado
+      if (!obstacleAhead) {
+        const step = forward.clone().multiplyScalar(p.speed * delta);
+        p.group.position.add(step);
+      }
+
+      // Mantener piso de la sala
+      p.group.position.y = p.floorY;
     }
-
-    // 5. Delimitación física cartesiana inviolable dentro de Sala de Cirugía
-    p.group.position.x = THREE.MathUtils.clamp(p.group.position.x, -10.6, -4.2);
-    p.group.position.z = THREE.MathUtils.clamp(p.group.position.z, 11.0, 15.9);
-
-    // 6. Temporizador de cambio de rumbo espontáneo y orgánico
-    p.rethinkTimer -= delta;
-    if (p.rethinkTimer <= 0) {
-      p.targetYaw += (Math.random() - 0.5) * 1.8;
-      p.rethinkTimer = 2.5 + Math.random() * 3.5;
-    }
-
-    // 7. Giro suave hacia targetYaw (interpolación angular)
-    let diff = p.targetYaw - p.currentYaw;
-    diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // envolver entre -PI y PI
-    const maxTurn = p.turnSpeed * delta;
-    if (Math.abs(diff) <= maxTurn) {
-      p.currentYaw = p.targetYaw;
-    } else {
-      p.currentYaw += Math.sign(diff) * maxTurn;
-    }
-
-    p.group.rotation.y = p.currentYaw;
-
-    // 8. Aplicar movimiento solo si no está bloqueado contra una pared o la cama
-    if (!obstacleAhead) {
-      const step = forward.clone().multiplyScalar(p.speed * delta);
-      p.group.position.add(step);
-    }
-
-    // Mantener altura del suelo de la sala
-    p.group.position.y = p.floorY;
   }
 }

@@ -407,7 +407,7 @@ export class UIManager {
   }
 
   // ── ACTIVACIÓN DEL JUMPSCARE POR COLISIÓN / CONTACTO CON EL ZOMBIE ──
-  triggerZombieJumpscare() {
+  triggerZombieJumpscare(roomName = '') {
     if (this._isJumpscareActive) return;
     this._isJumpscareActive = true;
 
@@ -453,7 +453,10 @@ export class UIManager {
           window._engine.lockPointer();
         }
 
-        this.showNotification('⚠️ ¡EL ZOMBIE TE HA ATRAPADO! Has sido expulsado al vestíbulo.', 5000);
+        const msg = roomName
+          ? `⚠️ ¡EL ZOMBIE DE ${roomName.toUpperCase()} TE HA ATRAPADO! Has sido expulsado al vestíbulo.`
+          : '⚠️ ¡EL ZOMBIE TE HA ATRAPADO! Has sido expulsado al vestíbulo.';
+        this.showNotification(msg, 5000);
         this._isJumpscareActive = false;
       }, 250);
     }, SCREAMER_DURATION);

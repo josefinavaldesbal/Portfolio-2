@@ -90,8 +90,8 @@ async function startGame() {
         ui.setLoadingProgress(percent, text);
       },
       // Callback: contacto con el zombie -> disparar jumpscare
-      () => {
-        ui.triggerZombieJumpscare();
+      (roomName) => {
+        ui.triggerZombieJumpscare(roomName);
       }
     );
     window._engine = engine;
