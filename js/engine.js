@@ -1145,17 +1145,20 @@ export class HospitalEngine {
           if (floorHit) floorY = floorHit.point.y;
         }
 
-        // Datos de patrullaje circular en Sala de Cirugía
+        // Datos de deambulación libre con prevención de colisión contra paredes
         this._zombiePatrol = {
           group: zombieGroup,
           center: new THREE.Vector3(-10.16, floorY, 15.43),
-          radius: 2.1,     // radio del círculo de patrullaje en metros
-          angle: 0.0,      // ángulo actual en radianes
-          speed: 0.6,      // velocidad de caminata circular
+          roomRadius: 2.8,       // Radio máximo de confinamiento dentro de la sala
+          currentYaw: Math.random() * Math.PI * 2, // orientación actual
+          targetYaw: Math.random() * Math.PI * 2,  // orientación deseada
+          speed: 0.75,           // velocidad de caminata natural (m/s)
+          turnSpeed: 2.8,        // velocidad de giro suave (rad/s)
+          rethinkTimer: 2.0,     // temporizador de cambio de dirección
           floorY: floorY
         };
 
-        // Activar la animación de caminata
+        // Activar la animación de caminata continua
         if (gltf.animations && gltf.animations.length > 0) {
           this._zombieMixer = new THREE.AnimationMixer(zombie);
           const clip = gltf.animations[0];
@@ -1163,13 +1166,12 @@ export class HospitalEngine {
           action.play();
         }
 
-        // Posicionar inicialmente
-        const initX = this._zombiePatrol.center.x + Math.cos(0) * this._zombiePatrol.radius;
-        const initZ = this._zombiePatrol.center.z + Math.sin(0) * this._zombiePatrol.radius;
-        zombieGroup.position.set(initX, floorY, initZ);
+        // Posicionar inicialmente dentro de la sala
+        zombieGroup.position.set(-10.16, floorY, 15.43);
+        zombieGroup.rotation.y = this._zombiePatrol.currentYaw;
 
         this.scene.add(zombieGroup);
-        console.log(`[Zombie Cirugía] Modelo cargado y patrullando en Sala de Cirugía (${modelPath})`);
+        console.log(`[Zombie Cirugía] Modelo cargado y deambulando libremente dentro de Sala de Cirugía.`);
       },
       undefined,
       (err) => {
@@ -1178,23 +1180,107 @@ export class HospitalEngine {
     );
   }
 
+  // ── IA DE DEAMBULACIÓN LIBRE SIN ATRAVESAR PAREDES ─────────
   _updateZombiePatrol(delta) {
     if (this._zombieMixer) {
       this._zombieMixer.update(delta);
     }
-    if (this._zombiePatrol) {
-      const p = this._zombiePatrol;
-      p.angle += delta * p.speed;
+    if (!this._zombiePatrol) return;
 
-      const curX = p.center.x + Math.cos(p.angle) * p.radius;
-      const curZ = p.center.z + Math.sin(p.angle) * p.radius;
-      p.group.position.set(curX, p.floorY, curZ);
+    const p = this._zombiePatrol;
 
-      // Orientar de forma tangente a la trayectoria circular hacia el siguiente punto
-      const nextAngle = p.angle + 0.1;
-      const nextX = p.center.x + Math.cos(nextAngle) * p.radius;
-      const nextZ = p.center.z + Math.sin(nextAngle) * p.radius;
-      p.group.lookAt(nextX, p.floorY, nextZ);
+    // 1. Orientar grupo y obtener vector frontal real en espacio de mundo
+    p.group.rotation.y = p.currentYaw;
+    const forward = new THREE.Vector3();
+    p.group.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+
+    // 2. Detección de paredes con rayos frontales (a la altura del pecho del zombie)
+    let obstacleAhead = false;
+
+    if (this.collidableMeshes && this.collidableMeshes.length > 0) {
+      const chestPos = p.group.position.clone();
+      chestPos.y += 1.0;
+
+      // Rayo frontal directo (distancia de detección 0.9m)
+      this._raycaster.set(chestPos, forward);
+      this._raycaster.far = 0.9;
+      const frontHits = this._raycaster.intersectObjects(this.collidableMeshes, false);
+      const isWall = (hit) => hit && hit.face && Math.abs(hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y) < 0.45;
+
+      const wallHit = frontHits.find(isWall);
+      if (wallHit) {
+        obstacleAhead = true;
+
+        // Normal de la pared impactada en coordenadas de mundo (apunta hacia adentro de la sala)
+        const wallNormal = wallHit.face.normal.clone().transformDirection(wallHit.object.matrixWorld);
+        wallNormal.y = 0;
+        wallNormal.normalize();
+
+        // Rebotar orgánicamente hacia el espacio abierto alejándose de la pared
+        const bounceDir = wallNormal.clone().add(new THREE.Vector3(
+          (Math.random() - 0.5) * 0.8,
+          0,
+          (Math.random() - 0.5) * 0.8
+        )).normalize();
+
+        p.targetYaw = Math.atan2(bounceDir.x, bounceDir.z);
+        p.rethinkTimer = 2.0 + Math.random() * 2.0;
+
+        // Si está pegado a la pared (<0.35m), empujar suavemente hacia afuera
+        if (wallHit.distance < 0.35) {
+          p.group.position.addScaledVector(wallNormal, 0.05);
+        }
+      }
     }
+
+    // 3. Confinamiento estricto en Sala de Cirugía (no salir hacia el pasillo)
+    const distToCenter = Math.hypot(p.group.position.x - p.center.x, p.group.position.z - p.center.z);
+    if (distToCenter > p.roomRadius) {
+      // Girar de regreso hacia el centro de la sala
+      const toCenter = p.center.clone().sub(p.group.position);
+      toCenter.y = 0;
+      toCenter.normalize();
+      p.targetYaw = Math.atan2(toCenter.x, toCenter.z) + (Math.random() - 0.5) * 0.3;
+      p.rethinkTimer = 2.5 + Math.random() * 1.5;
+
+      // Si sobrepasa el límite seguro, limitar posición físicamente
+      if (distToCenter > p.roomRadius + 0.3) {
+        const offset = p.group.position.clone().sub(p.center);
+        offset.y = 0;
+        offset.setLength(p.roomRadius + 0.3);
+        p.group.position.x = p.center.x + offset.x;
+        p.group.position.z = p.center.z + offset.z;
+      }
+    }
+
+    // 4. Temporizador de cambio de rumbo espontáneo y orgánico
+    p.rethinkTimer -= delta;
+    if (p.rethinkTimer <= 0) {
+      p.targetYaw += (Math.random() - 0.5) * 1.8;
+      p.rethinkTimer = 2.5 + Math.random() * 3.5;
+    }
+
+    // 5. Giro suave hacia targetYaw (interpolación angular)
+    let diff = p.targetYaw - p.currentYaw;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // envolver entre -PI y PI
+    const maxTurn = p.turnSpeed * delta;
+    if (Math.abs(diff) <= maxTurn) {
+      p.currentYaw = p.targetYaw;
+    } else {
+      p.currentYaw += Math.sign(diff) * maxTurn;
+    }
+
+    p.group.rotation.y = p.currentYaw;
+
+    // 6. Aplicar movimiento solo si no está bloqueado contra una pared frontal
+    if (!obstacleAhead) {
+      const step = forward.clone().multiplyScalar(p.speed * delta);
+      p.group.position.add(step);
+    }
+
+    // Mantener altura del suelo de la sala
+    p.group.position.y = p.floorY;
   }
 }
