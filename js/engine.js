@@ -1106,25 +1106,25 @@ export class HospitalEngine {
       },
       {
         roomName: 'Morgue',
-        spawnPos: { x: 25.00, z: -3.88 },
-        center: { x: 25.00, z: -3.88 },
-        probeY: 5.0,
-        estimatedFloorY: 2.55 - PLAYER_HEIGHT,
-        roomRadius: 2.6,
+        spawnPos: { x: 26.50, z: -6.00 },
+        center: { x: 26.50, z: -6.00 },
+        probeY: 2.5,
+        estimatedFloorY: 0.85,
+        roomRadius: 3.0,
         totemPos: { x: 27.09, z: -3.88 },
-        totemRadius: 1.4,
-        bounds: { minX: 22.8, maxX: 28.5, minZ: -6.5, maxZ: -1.2 }
+        totemRadius: 1.5,
+        bounds: { minX: 21.0, maxX: 31.0, minZ: -9.8, maxZ: -3.8 }
       },
       {
         roomName: 'Laboratorio',
-        spawnPos: { x: -17.20, z: 2.09 },
-        center: { x: -17.20, z: 2.09 },
+        spawnPos: { x: -15.50, z: 4.50 },
+        center: { x: -15.50, z: 4.50 },
         probeY: 9.0,
-        estimatedFloorY: 7.65 - PLAYER_HEIGHT,
+        estimatedFloorY: 5.95,
         roomRadius: 2.8,
-        totemPos: { x: -19.69, z: 2.09 },
+        totemPos: { x: -18.40, z: 2.70 },
         totemRadius: 1.5,
-        bounds: { minX: -21.0, maxX: -15.2, minZ: -0.5, maxZ: 4.8 }
+        bounds: { minX: -19.5, maxX: -12.5, minZ: 1.8, maxZ: 7.5 }
       },
       {
         roomName: 'Psiquiátrico',

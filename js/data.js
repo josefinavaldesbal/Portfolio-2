@@ -141,11 +141,11 @@ export const INTERACTION_POINTS = [
   },
   {
     workId: 'work-3',
-    position: { x: -19.69, y: 7.65, z:  2.09 },
+    position: { x: -18.40, y: 7.65, z:  2.70 },
     radius: 3.5,
     label: 'Laboratorio',
     model: 'assets/models/abandoned_antique_recliner_lounge.glb',
-    targetSize: 2.2,
+    targetSize: 1.85,
   },
   {
     workId: 'work-4',
